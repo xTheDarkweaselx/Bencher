@@ -44,7 +44,7 @@ struct ContentView: View {
                 }
                 .tag("trends")
             
-            ReferenceDevicesView()
+            ReferenceDevicesView(scores: scores)
                 .tabItem {
                     Label("Reference", systemImage: "iphone.gen3")
                 }
@@ -87,6 +87,7 @@ struct BenchmarkView: View {
     @Binding var scores: [BenchmarkResult]
     @AppStorage("benchmarkIntensity") private var benchmarkIntensity: String = "Balanced"
     @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 1
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var singleCoreScore: Double? = nil
     @State private var cpuScore: Double? = nil
@@ -110,34 +111,25 @@ struct BenchmarkView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                gradient: Gradient(colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.4)]),
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            Color(.systemBackground)
+                .ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 20) {
-                    Text("Welcome to Bencher")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
+                    benchmarkHero
+
+                    benchmarkControlStrip
 
                     // Thermal warning UI
                     let thermal = ProcessInfo.processInfo.thermalState
                     if thermal == .critical {
-                        Text("⛔️ Device is at critical temps — results will be reduced")
-                            .foregroundColor(.red)
+                        benchmarkNotice("Device is at critical temps. Results will be reduced.", tint: .red, systemImage: "exclamationmark.octagon.fill")
                     }
                     else if thermal == .serious {
-                        Text("⚠️ Device is hot — results may be reduced")
-                            .foregroundColor(.orange)
+                        benchmarkNotice("Device is hot. Results may be reduced.", tint: .orange, systemImage: "thermometer.medium")
                     }
                     else if thermal != .nominal {
-                        Text("⚠️ Device is warm — results may be reduced")
-                            .foregroundColor(.yellow)
+                        benchmarkNotice("Device is warm. Results may be reduced.", tint: .yellow, systemImage: "thermometer.low")
                     }
 
                     if let benchmarkFailedMessage = benchmarkFailedMessage {
@@ -151,18 +143,10 @@ struct BenchmarkView: View {
                             .padding(.horizontal)
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Overall Progress")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        ProgressBar(progress: $overallProgress, color: .green)
-                    }
+                    benchmarkProgressSection
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(progressMessage)
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        ProgressBar(progress: $taskProgress, color: .blue)
+                    if hasAnyVisibleScores {
+                        benchmarkResultsHeader
                     }
 
                     if let singleCoreScore = singleCoreScore {
@@ -230,25 +214,28 @@ struct BenchmarkView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Latest Run Summary")
                                 .font(.headline)
-                                .foregroundColor(.white)
+                                .foregroundColor(.primary)
 
                             Text("Overall score: \(String(format: "%.0f", overallScore))")
                                 .font(.title3.weight(.bold))
-                                .foregroundColor(.white)
+                                .foregroundColor(.primary)
 
                             Text("Benchmark type: \(benchmarkIntensity) • Stability runs: \(benchmarkRepeatCount)")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.85))
+                                .foregroundColor(.secondary)
 
                             Text(summaryText(overallScore: overallScore))
                                 .font(.callout)
-                                .foregroundColor(.white.opacity(0.9))
+                                .foregroundColor(.secondary)
                         }
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.green.opacity(0.22))
+                        .background(benchmarkCardBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                        )
                         .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .padding(.horizontal)
                     }
 
                     HStack(spacing: 12) {
@@ -293,6 +280,180 @@ struct BenchmarkView: View {
             .safeAreaPadding(.top, 20)
             .scrollIndicators(.visible)
         }
+    }
+
+    private var benchmarkCardBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)
+    }
+
+    private var hasAnyVisibleScores: Bool {
+        singleCoreScore != nil
+        || cpuScore != nil
+        || memoryScore != nil
+        || ssdScore != nil
+        || graphicsScore != nil
+        || overallScore != nil
+    }
+
+    private var benchmarkHero: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Welcome to Bencher")
+                        .font(.largeTitle.bold())
+                    Text("Get to learn your CPU, memory, storage and graphics performance in one press.")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(Color.blue.opacity(0.12))
+                        .frame(width: 54, height: 54)
+                    Image(systemName: "speedometer")
+                        .font(.title2.weight(.semibold))
+                        .foregroundColor(.blue)
+                }
+            }
+
+            HStack(spacing: 10) {
+                benchmarkInfoChip(title: benchmarkIntensity, systemImage: "dial.medium")
+                benchmarkInfoChip(title: "\(benchmarkRepeatCount)x stability", systemImage: "repeat")
+                benchmarkInfoChip(title: benchmarkComplete ? "Ready" : (isRunning ? "In Progress" : "Idle"), systemImage: isRunning ? "waveform.path.ecg" : "checkmark.circle")
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BencherTheme.cardGradient)
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+
+    private var benchmarkControlStrip: some View {
+        HStack(spacing: 12) {
+            benchmarkMiniCard(title: "Intensity", value: benchmarkIntensity, tint: .blue)
+            benchmarkMiniCard(title: "Stability", value: "\(benchmarkRepeatCount) run\(benchmarkRepeatCount == 1 ? "" : "s")", tint: .green)
+        }
+    }
+
+    private var benchmarkProgressSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Benchmark Progress")
+                        .font(.headline)
+                    Text(isRunning ? "Live progress updates while the current run is executing." : "Progress indicators will update here once a run starts.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Overall Progress")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(Int(overallProgress * 100))%")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+                ProgressBar(progress: $overallProgress, color: .green)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(progressMessage)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(Int(taskProgress * 100))%")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+                ProgressBar(progress: $taskProgress, color: .blue)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(benchmarkCardBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var benchmarkResultsHeader: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Live Results")
+                    .font(.headline)
+                Text("Each metric card updates as the benchmark progresses.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func benchmarkMiniCard(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.headline)
+                .foregroundColor(.primary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(benchmarkCardBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(tint.opacity(0.18), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func benchmarkInfoChip(title: String, systemImage: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.caption)
+            Text(title)
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundColor(.primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06))
+        .clipShape(Capsule())
+    }
+
+    private func benchmarkNotice(_ text: String, tint: Color, systemImage: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundColor(tint)
+            Text(text)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.primary)
+            Spacer()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(tint.opacity(0.2), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     func runBenchmark() {
@@ -475,7 +636,8 @@ struct BenchmarkView: View {
                         graphicsScore: calibratedGraphics,
                         overallScore: overall,
                         timestamp: Date(),
-                        thermalState: ProcessInfo.processInfo.thermalState.rawValue
+                        thermalState: ProcessInfo.processInfo.thermalState.rawValue,
+                        wasConnectedToPower: currentPowerConnectionState()
                     )
                     scores.append(newResult)
                     BenchmarkStorage.save(scores)
@@ -523,6 +685,23 @@ struct BenchmarkView: View {
             return "This sits in the mid-range band for the current calibration model."
         default:
             return "This result sits in the entry to lower-mid range for the current calibration model."
+        }
+    }
+
+    private func currentPowerConnectionState() -> Bool? {
+        let device = UIDevice.current
+        let wasMonitoringEnabled = device.isBatteryMonitoringEnabled
+        device.isBatteryMonitoringEnabled = true
+        let state = device.batteryState
+        device.isBatteryMonitoringEnabled = wasMonitoringEnabled
+
+        switch state {
+        case .charging, .full:
+            return true
+        case .unplugged:
+            return false
+        default:
+            return nil
         }
     }
 
@@ -643,6 +822,7 @@ struct HistoryView: View {
     @State private var selectedDeviceHistoryFilter: String = "All Devices"
     @State private var selectedBenchmarkHistoryFilter: String = "All Intensities"
     @State private var selectedThermalHistoryFilter: String = "All Thermal States"
+    @State private var selectedPowerHistoryFilter: String = "All Power States"
     @State private var favouritesOnly: Bool = false
     @State private var isShowingDeleteAllConfirmation: Bool = false
     @State private var isShowingMultiDeleteSheet: Bool = false
@@ -678,9 +858,10 @@ struct HistoryView: View {
             let matchesDevice = selectedDeviceHistoryFilter == "All Devices" || result.deviceName == selectedDeviceHistoryFilter
             let matchesBenchmark = selectedBenchmarkHistoryFilter == "All Intensities" || result.benchmarkIntensity == selectedBenchmarkHistoryFilter
             let matchesThermal = selectedThermalHistoryFilter == "All Thermal States" || thermalStateText(result.thermalState) == selectedThermalHistoryFilter
+            let matchesPower = selectedPowerHistoryFilter == "All Power States" || powerConnectionText(result.wasConnectedToPower) == selectedPowerHistoryFilter
             let matchesFavourite = !favouritesOnly || result.isPinned
 
-            return matchesSearch && matchesDevice && matchesBenchmark && matchesThermal && matchesFavourite
+            return matchesSearch && matchesDevice && matchesBenchmark && matchesThermal && matchesPower && matchesFavourite
         }
     }
 
@@ -694,6 +875,10 @@ struct HistoryView: View {
 
     private var historyThermalFilters: [String] {
         ["All Thermal States", "Nominal", "Fair", "Serious", "Critical", "Unknown"]
+    }
+
+    private var historyPowerFilters: [String] {
+        ["All Power States", "On AC Power", "Not on AC Power", "Unknown"]
     }
 
     private var selectedResult: BenchmarkResult? {
@@ -783,9 +968,11 @@ struct HistoryView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: horizontalSizeClass == .compact ? 8 : 10) {
                             Menu {
-                                Picker("Device", selection: $selectedDeviceHistoryFilter) {
-                                    ForEach(historyDevices, id: \.self) { device in
-                                        Text(device).tag(device)
+                                ForEach(historyDevices, id: \.self) { device in
+                                    Button {
+                                        selectedDeviceHistoryFilter = device
+                                    } label: {
+                                        historyMenuLabel(title: device, isSelected: selectedDeviceHistoryFilter == device)
                                     }
                                 }
                             } label: {
@@ -793,9 +980,11 @@ struct HistoryView: View {
                             }
                             
                             Menu {
-                                Picker("Benchmark Intensity", selection: $selectedBenchmarkHistoryFilter) {
-                                    ForEach(historyBenchmarkIntensities, id: \.self) { intensity in
-                                        Text(intensity).tag(intensity)
+                                ForEach(historyBenchmarkIntensities, id: \.self) { intensity in
+                                    Button {
+                                        selectedBenchmarkHistoryFilter = intensity
+                                    } label: {
+                                        historyMenuLabel(title: intensity, isSelected: selectedBenchmarkHistoryFilter == intensity)
                                     }
                                 }
                             } label: {
@@ -803,13 +992,27 @@ struct HistoryView: View {
                             }
                             
                             Menu {
-                                Picker("Thermal State", selection: $selectedThermalHistoryFilter) {
-                                    ForEach(historyThermalFilters, id: \.self) { thermal in
-                                        Text(thermal).tag(thermal)
+                                ForEach(historyThermalFilters, id: \.self) { thermal in
+                                    Button {
+                                        selectedThermalHistoryFilter = thermal
+                                    } label: {
+                                        historyMenuLabel(title: thermal, isSelected: selectedThermalHistoryFilter == thermal)
                                     }
                                 }
                             } label: {
                                 filterChip(title: selectedThermalHistoryFilter, systemImage: "thermometer.medium")
+                            }
+
+                            Menu {
+                                ForEach(historyPowerFilters, id: \.self) { power in
+                                    Button {
+                                        selectedPowerHistoryFilter = power
+                                    } label: {
+                                        historyMenuLabel(title: power, isSelected: selectedPowerHistoryFilter == power)
+                                    }
+                                }
+                            } label: {
+                                filterChip(title: selectedPowerHistoryFilter, systemImage: "powerplug")
                             }
                             
                             Button {
@@ -905,13 +1108,13 @@ struct HistoryView: View {
                             .disabled(selectedResult == nil)
 
                             Button {
-                                isShowingImporter = true
+                                presentHistoryImporter()
                             } label: {
                                 Label("Import", systemImage: "square.and.arrow.down")
                             }
 
                             Button {
-                                isShowingMultiDeleteSheet = true
+                                presentMultiDelete()
                             } label: {
                                 Label("Multi-Delete", systemImage: "checklist")
                             }
@@ -920,7 +1123,7 @@ struct HistoryView: View {
 
                         Section {
                             Button(role: .destructive) {
-                                isShowingDeleteAllConfirmation = true
+                                presentDeleteAllConfirmation()
                             } label: {
                                 Label("Delete All History", systemImage: "trash")
                             }
@@ -1298,6 +1501,14 @@ struct HistoryView: View {
                     tint: .green
                 )
             }
+
+            if let wasConnectedToPower = result.wasConnectedToPower {
+                historyStatusChip(
+                    title: wasConnectedToPower ? "Power: AC" : "Power: Battery",
+                    systemImage: wasConnectedToPower ? "powerplug" : "battery.50",
+                    tint: wasConnectedToPower ? .blue : .gray
+                )
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1341,6 +1552,7 @@ struct HistoryView: View {
         selectedDeviceHistoryFilter = "All Devices"
         selectedBenchmarkHistoryFilter = "All Intensities"
         selectedThermalHistoryFilter = "All Thermal States"
+        selectedPowerHistoryFilter = "All Power States"
         favouritesOnly = false
 
         guard let matched = scores.first(where: { $0.id == id }) else { return }
@@ -1419,7 +1631,8 @@ struct HistoryView: View {
             graphicsScore: existing.graphicsScore,
             overallScore: existing.overallScore,
             timestamp: existing.timestamp,
-            thermalState: existing.thermalState
+            thermalState: existing.thermalState,
+            wasConnectedToPower: existing.wasConnectedToPower
         )
 
         BenchmarkStorage.save(scores)
@@ -1512,7 +1725,8 @@ struct HistoryView: View {
             graphicsScore: existing.graphicsScore,
             overallScore: existing.overallScore,
             timestamp: existing.timestamp,
-            thermalState: existing.thermalState
+            thermalState: existing.thermalState,
+            wasConnectedToPower: existing.wasConnectedToPower
         )
 
         BenchmarkStorage.save(scores)
@@ -1594,6 +1808,29 @@ struct HistoryView: View {
         }
     }
 
+    private func powerConnectionText(_ state: Bool?) -> String {
+        guard let state else { return "Unknown" }
+        return state ? "On AC Power" : "Not on AC Power"
+    }
+
+    private func presentHistoryImporter() {
+        DispatchQueue.main.async {
+            isShowingImporter = true
+        }
+    }
+
+    private func presentMultiDelete() {
+        DispatchQueue.main.async {
+            isShowingMultiDeleteSheet = true
+        }
+    }
+
+    private func presentDeleteAllConfirmation() {
+        DispatchQueue.main.async {
+            isShowingDeleteAllConfirmation = true
+        }
+    }
+
     private func importHistory(from url: URL) {
         let accessed = url.startAccessingSecurityScopedResource()
         defer {
@@ -1646,6 +1883,16 @@ struct HistoryView: View {
         .padding(.vertical, horizontalSizeClass == .compact ? 6 : 7)
         .background(BencherTheme.accentChipGradient)
         .clipShape(Capsule())
+    }
+
+    private func historyMenuLabel(title: String, isSelected: Bool) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark")
+            }
+        }
     }
     
     @ViewBuilder
@@ -1731,6 +1978,12 @@ struct DetailedResultView: View {
                             systemImage: result.thermalState > 0 ? "thermometer.medium" : "checkmark.circle.fill",
                             tint: result.thermalState > 0 ? .orange : .green
                         )
+
+                        detailStatusChip(
+                            title: powerConnectionText(result.wasConnectedToPower),
+                            systemImage: result.wasConnectedToPower == true ? "powerplug.fill" : "battery.50",
+                            tint: result.wasConnectedToPower == true ? .blue : (result.wasConnectedToPower == false ? .secondary : .gray)
+                        )
                     }
                 }
 
@@ -1759,6 +2012,15 @@ struct DetailedResultView: View {
                             .foregroundColor(.secondary)
                         Text("Session: \(result.sessionID.uuidString.prefix(8))")
                             .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack(spacing: 8) {
+                        Image(systemName: result.wasConnectedToPower == true ? "powerplug" : "battery.50")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(powerConnectionText(result.wasConnectedToPower))
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -1932,6 +2194,7 @@ struct DetailedResultView: View {
         SSD: \(String(format: "%.0f", result.ssdScore))
         Graphics: \(String(format: "%.0f", result.graphicsScore))
         Thermal State: \(thermalStateText(result.thermalState))
+        Power State: \(powerConnectionText(result.wasConnectedToPower))
         """
     }
     
@@ -2070,6 +2333,11 @@ struct DetailedResultView: View {
         }
     }
 
+    private func powerConnectionText(_ state: Bool?) -> String {
+        guard let state else { return "Unknown" }
+        return state ? "On AC Power" : "Not on AC Power"
+    }
+
     private func generateInsight() -> String {
         if result.ssdScore < 500 {
             return "Storage performance is below expected range. This may indicate thermal throttling or background disk activity."
@@ -2177,9 +2445,11 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         case overallScore
         case timestamp
         case thermalState
+        case wasConnectedToPower
     }
 
     let thermalState: Int
+    let wasConnectedToPower: Bool?
 
     init(
         id: UUID = UUID(),
@@ -2200,7 +2470,8 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         graphicsScore: Double,
         overallScore: Double,
         timestamp: Date,
-        thermalState: Int
+        thermalState: Int,
+        wasConnectedToPower: Bool? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -2221,6 +2492,7 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         self.overallScore = overallScore
         self.timestamp = timestamp
         self.thermalState = thermalState
+        self.wasConnectedToPower = wasConnectedToPower
     }
 
     init(from decoder: Decoder) throws {
@@ -2245,6 +2517,7 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         overallScore = try container.decodeIfPresent(Double.self, forKey: .overallScore) ?? 0
         timestamp = try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
         thermalState = try container.decodeIfPresent(Int.self, forKey: .thermalState) ?? 0
+        wasConnectedToPower = try container.decodeIfPresent(Bool.self, forKey: .wasConnectedToPower)
     }
 
     let singleCoreScore: Double
@@ -2341,7 +2614,7 @@ struct ProgressBar: View {
 
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.white.opacity(0.2))
+                    .fill(Color(.secondarySystemFill))
                     .frame(height: 20)
 
                 RoundedRectangle(cornerRadius: 10)
@@ -2367,38 +2640,25 @@ struct ScoreCard: View {
         VStack {
             Text(title)
                 .font(.headline)
-                .foregroundColor(.white)
+                .foregroundColor(.primary)
 
             Text(String(format: "%.0f", score))
                 .font(isBold ? .largeTitle : .title)
                 .fontWeight(isBold ? .bold : .regular)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [color, color.opacity(0.6)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .foregroundColor(color)
 
             if let footerText {
                 Text(footerText)
                     .font(.caption2)
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(.secondary)
                     .padding(.top, 2)
             }
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .foregroundStyle(
-            LinearGradient(
-                colors: [color, color.opacity(0.6)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
         .background(
             RoundedRectangle(cornerRadius: 15)
-                .fill(BencherTheme.cardGradient)
+                .fill(Color(.secondarySystemBackground))
         )
         .padding(.horizontal)
         .scaleEffect(hasAnimatedIn ? 1.0 : 0.97)
@@ -2698,7 +2958,8 @@ enum BenchmarkStorage {
                     graphicsScore: graphicsScore,
                     overallScore: overallScore,
                     timestamp: timestamp,
-                    thermalState: item["thermalState"] as? Int ?? 0
+                    thermalState: item["thermalState"] as? Int ?? 0,
+                    wasConnectedToPower: item["wasConnectedToPower"] as? Bool
                 )
             }
             return mapped.sorted(by: { $0.timestamp > $1.timestamp })
@@ -2807,7 +3068,8 @@ struct BenchmarkHistoryCSVDocument: FileDocument {
             "graphicsScore",
             "overallScore",
             "timestamp",
-            "thermalState"
+            "thermalState",
+            "wasConnectedToPower"
         ].joined(separator: ",")
 
         let formatter = ISO8601DateFormatter()
@@ -2828,7 +3090,8 @@ struct BenchmarkHistoryCSVDocument: FileDocument {
                 String(format: "%.0f", result.graphicsScore),
                 String(format: "%.0f", result.overallScore),
                 formatter.string(from: result.timestamp),
-                String(result.thermalState)
+                String(result.thermalState),
+                result.wasConnectedToPower.map { $0 ? "true" : "false" } ?? ""
             ]
             return columns.joined(separator: ",")
         }
@@ -2874,6 +3137,17 @@ struct BenchmarkHistoryCSVDocument: FileDocument {
             let overallScore = Double(columns[12]) ?? 0
             let timestamp = formatter.date(from: columns[13]) ?? Date()
             let thermalState = Int(columns[14]) ?? 0
+            let wasConnectedToPower: Bool? = {
+                guard columns.count > 15 else { return nil }
+                switch columns[15].lowercased() {
+                case "true":
+                    return true
+                case "false":
+                    return false
+                default:
+                    return nil
+                }
+            }()
 
             return BenchmarkResult(
                 id: id,
@@ -2894,7 +3168,8 @@ struct BenchmarkHistoryCSVDocument: FileDocument {
                 graphicsScore: graphicsScore,
                 overallScore: overallScore,
                 timestamp: timestamp,
-                thermalState: thermalState
+                thermalState: thermalState,
+                wasConnectedToPower: wasConnectedToPower
             )
         }
     }
@@ -3199,22 +3474,35 @@ struct CompareSelectionView: View {
     @Binding var selectedIDs: Set<BenchmarkResult.ID>
     let onComplete: ([BenchmarkResult]) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var searchText: String = ""
 
     private var selectedResults: [BenchmarkResult] {
         scores.filter { selectedIDs.contains($0.id) }
+    }
+
+    private var filteredScores: [BenchmarkResult] {
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearch.isEmpty else { return scores }
+
+        return scores.filter { result in
+            result.deviceName.localizedCaseInsensitiveContains(trimmedSearch)
+            || result.benchmarkIntensity.localizedCaseInsensitiveContains(trimmedSearch)
+            || result.timestamp.formatted(date: .abbreviated, time: .shortened).localizedCaseInsensitiveContains(trimmedSearch)
+            || String(format: "%.0f", result.overallScore).localizedCaseInsensitiveContains(trimmedSearch)
+        }
     }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text("Select two benchmark runs to compare. No results are preselected.")
+                    Text("Select two benchmark runs to compare. Search by device, score, date or mode to narrow large histories quickly.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
 
                 Section("Select exactly two results") {
-                    ForEach(scores) { result in
+                    ForEach(filteredScores) { result in
                         Button {
                             toggleSelection(for: result.id)
                         } label: {
@@ -3241,6 +3529,7 @@ struct CompareSelectionView: View {
                 }
             }
             .navigationTitle("Compare Results")
+            .searchable(text: $searchText, prompt: "Search device, score, date or mode")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") {
@@ -3270,6 +3559,7 @@ struct CompareSelectionView: View {
             selectedIDs.insert(id)
         }
     }
+
 }
 
 // MARK: - Compare Results View
@@ -3707,6 +3997,51 @@ enum TrendTimeRange: String, CaseIterable, Identifiable {
 
     var title: String { rawValue }
 }
+
+private struct DailyTrendPoint: Identifiable {
+    let date: Date
+    let runs: [BenchmarkResult]
+
+    var id: Date { date }
+
+    var representativeRun: BenchmarkResult? {
+        runs.max(by: { $0.timestamp < $1.timestamp })
+    }
+
+    var deviceName: String {
+        representativeRun?.deviceName ?? "Unknown Device"
+    }
+
+    var benchmarkIntensity: String {
+        representativeRun?.benchmarkIntensity ?? "Unknown"
+    }
+
+    var overallScore: Double {
+        average(for: \.overallScore)
+    }
+
+    var cpuScore: Double {
+        average(for: \.cpuScore)
+    }
+
+    var graphicsScore: Double {
+        average(for: \.graphicsScore)
+    }
+
+    var ssdScore: Double {
+        average(for: \.ssdScore)
+    }
+
+    func metricValue(for keyPath: KeyPath<BenchmarkResult, Double>) -> Double {
+        average(for: keyPath)
+    }
+
+    private func average(for keyPath: KeyPath<BenchmarkResult, Double>) -> Double {
+        guard !runs.isEmpty else { return 0 }
+        return runs.map { $0[keyPath: keyPath] }.reduce(0, +) / Double(runs.count)
+    }
+}
+
 struct TrendsView: View {
     let scores: [BenchmarkResult]
     @Binding var selectedTab: String
@@ -3714,22 +4049,22 @@ struct TrendsView: View {
     @State private var selectedDeviceFilter: String = "All Devices"
     @State private var selectedBenchmarkFilter: String = "Balanced"
     @State private var selectedTimeRange: TrendTimeRange = .allTime
-    @State private var selectedTrendResultID: BenchmarkResult.ID? = nil
+    @State private var selectedTrendDate: Date? = nil
     
-    private var peakRun: BenchmarkResult? {
-        chronologicalScores.max(by: { $0.overallScore < $1.overallScore })
+    private var peakDay: DailyTrendPoint? {
+        dailyTrendPoints.max(by: { $0.overallScore < $1.overallScore })
     }
 
-    private var lowestRun: BenchmarkResult? {
-        chronologicalScores.min(by: { $0.overallScore < $1.overallScore })
+    private var lowestDay: DailyTrendPoint? {
+        dailyTrendPoints.min(by: { $0.overallScore < $1.overallScore })
     }
 
-    private func peakRun(for keyPath: KeyPath<BenchmarkResult, Double>) -> BenchmarkResult? {
-        chronologicalScores.max(by: { $0[keyPath: keyPath] < $1[keyPath: keyPath] })
+    private func peakDay(for keyPath: KeyPath<BenchmarkResult, Double>) -> DailyTrendPoint? {
+        dailyTrendPoints.max(by: { $0.metricValue(for: keyPath) < $1.metricValue(for: keyPath) })
     }
 
-    private func lowestRun(for keyPath: KeyPath<BenchmarkResult, Double>) -> BenchmarkResult? {
-        chronologicalScores.min(by: { $0[keyPath: keyPath] < $1[keyPath: keyPath] })
+    private func lowestDay(for keyPath: KeyPath<BenchmarkResult, Double>) -> DailyTrendPoint? {
+        dailyTrendPoints.min(by: { $0.metricValue(for: keyPath) < $1.metricValue(for: keyPath) })
     }
 
     private func startDate(for latestDate: Date) -> Date? {
@@ -3776,6 +4111,18 @@ struct TrendsView: View {
         return sorted.filter { $0.timestamp >= startDate }
     }
 
+    private var dailyTrendPoints: [DailyTrendPoint] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: chronologicalScores) { result in
+            calendar.startOfDay(for: result.timestamp)
+        }
+
+        return grouped.keys.sorted().compactMap { date in
+            guard let runs = grouped[date]?.sorted(by: { $0.timestamp < $1.timestamp }) else { return nil }
+            return DailyTrendPoint(date: date, runs: runs)
+        }
+    }
+
     private var availableDevices: [String] {
         let names = Set(scores.map { $0.deviceName })
         return ["All Devices"] + names.sorted()
@@ -3785,18 +4132,18 @@ struct TrendsView: View {
         ["Balanced", "Light", "Extreme", "All Types"]
     }
 
-    private var latest: BenchmarkResult? {
-        chronologicalScores.last
+    private var latest: DailyTrendPoint? {
+        dailyTrendPoints.last
     }
 
-    private var previous: BenchmarkResult? {
-        guard chronologicalScores.count >= 2 else { return nil }
-        return chronologicalScores[chronologicalScores.count - 2]
+    private var previous: DailyTrendPoint? {
+        guard dailyTrendPoints.count >= 2 else { return nil }
+        return dailyTrendPoints[dailyTrendPoints.count - 2]
     }
     
-    private var selectedTrendResult: BenchmarkResult? {
-        guard let selectedTrendResultID else { return nil }
-        return chronologicalScores.first(where: { $0.id == selectedTrendResultID })
+    private var selectedTrendPoint: DailyTrendPoint? {
+        guard let selectedTrendDate else { return nil }
+        return dailyTrendPoints.first(where: { Calendar.current.isDate($0.date, inSameDayAs: selectedTrendDate) })
     }
 
     var body: some View {
@@ -3806,53 +4153,9 @@ struct TrendsView: View {
                     Text("Performance Trends")
                         .font(.largeTitle.bold())
                     
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Device Filter")
-                            .font(.headline)
-                        
-                        Picker("Device", selection: $selectedDeviceFilter) {
-                            ForEach(availableDevices, id: \.self) { device in
-                                Text(device).tag(device)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        
-                        Picker("Benchmark Intensity", selection: $selectedBenchmarkFilter) {                            ForEach(availableBenchmarkTypes, id: \.self) { type in
-                            Text(type).tag(type)
-                        }
-                        }
-                        .pickerStyle(.menu)
-                        
-                        Text("Switch between device types and benchmark types so trend data stays comparable and is not muddied by mixed benchmark workloads.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Time Range")
-                            .font(.headline)
-
-                        Picker("Time Range", selection: $selectedTimeRange) {
-                            ForEach(TrendTimeRange.allCases) { range in
-                                Text(range.title).tag(range)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-
-                        Text("Focus your trend graphs on recent or long-term performance windows like 7 days, 1 month, 6 months or all time.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    trendsControlPanel
                     
-                    if chronologicalScores.isEmpty {
+                    if dailyTrendPoints.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "chart.line.uptrend.xyaxis.circle")
                                 .font(.system(size: 36))
@@ -3881,9 +4184,10 @@ struct TrendsView: View {
                 .padding()
             }
             .navigationTitle("Trends")
-            .onChange(of: chronologicalScores.map(\.id)) { _, ids in
-                if let selectedTrendResultID, !ids.contains(selectedTrendResultID) {
-                    self.selectedTrendResultID = nil
+            .onChange(of: dailyTrendPoints.map(\.date)) { _, dates in
+                if let selectedTrendDate,
+                   !dates.contains(where: { Calendar.current.isDate($0, inSameDayAs: selectedTrendDate) }) {
+                    self.selectedTrendDate = nil
                 }
             }
         }
@@ -3907,16 +4211,100 @@ struct TrendsView: View {
         return "No data available yet"
     }
 
-    private var summaryCards: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Summary")
-                .font(.headline)
+    private var trendsControlPanel: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Trend Controls")
+                        .font(.headline)
+                    Text("Adjust what data is being compared and how much history stays visible on the charts.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
 
+                Spacer()
+
+                Image(systemName: "slider.horizontal.3")
+                    .font(.headline)
+                    .foregroundColor(.blue)
+                    .padding(10)
+                    .background(Color.blue.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                trendsFilterLabel("Comparison Filters")
+
+                HStack(spacing: 12) {
+                    Menu {
+                        ForEach(availableDevices, id: \.self) { device in
+                            Button {
+                                selectedDeviceFilter = device
+                            } label: {
+                                trendsMenuLabel(title: device, isSelected: selectedDeviceFilter == device)
+                            }
+                        }
+                    } label: {
+                        trendsFilterButton(title: selectedDeviceFilter, systemImage: "iphone")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Menu {
+                        ForEach(availableBenchmarkTypes, id: \.self) { type in
+                            Button {
+                                selectedBenchmarkFilter = type
+                            } label: {
+                                trendsMenuLabel(title: type, isSelected: selectedBenchmarkFilter == type)
+                            }
+                        }
+                    } label: {
+                        trendsFilterButton(title: selectedBenchmarkFilter, systemImage: "dial.medium")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Text("Switch between device types and benchmark types so trend data stays comparable and is not muddied by mixed benchmark workloads.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                trendsFilterLabel("Visible Time Range")
+
+                Picker("Time Range", selection: $selectedTimeRange) {
+                    ForEach(TrendTimeRange.allCases) { range in
+                        Text(range.title).tag(range)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Focus your trend graphs on recent or long-term performance windows like 7 days, 1 month, 6 months or all time.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BencherTheme.cardGradient)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private var summaryCards: some View {
+        trendsSectionCard(
+            title: "Summary",
+            subtitle: "A quick read on the latest movement in your current filtered trend set."
+        ) {
             HStack(spacing: 12) {
                 trendCard(
                     title: "Latest Overall",
                     value: latest.map { String(format: "%.0f", $0.overallScore) } ?? "—",
-                    subtitle: latest?.deviceName ?? "No device"
+                    subtitle: latest.map { "\($0.deviceName) average" } ?? "No device"
                 )
 
                 trendCard(
@@ -3942,39 +4330,39 @@ struct TrendsView: View {
                         .foregroundColor(delta >= 0 ? .green : .orange)
                 }
             }
-            Chart(chronologicalScores) { result in
+            Chart(dailyTrendPoints) { point in
                 LineMark(
-                    x: .value("Date", result.timestamp),
-                    y: .value("Overall", result.overallScore)
+                    x: .value("Date", point.date),
+                    y: .value("Overall", point.overallScore)
                 )
                 .interpolationMethod(.catmullRom)
                 .foregroundStyle(.blue)
 
                 // Only show the default point if not selected and not peak/low
-                if result.id != selectedTrendResult?.id,
-                   result.id != peakRun?.id,
-                   result.id != lowestRun?.id {
+                if point.id != selectedTrendPoint?.id,
+                   point.id != peakDay?.id,
+                   point.id != lowestDay?.id {
                     PointMark(
-                        x: .value("Date", result.timestamp),
-                        y: .value("Overall", result.overallScore)
+                        x: .value("Date", point.date),
+                        y: .value("Overall", point.overallScore)
                     )
                     .foregroundStyle(.blue)
                 }
 
-                if let selectedTrendResult,
-                   selectedTrendResult.id == result.id {
+                if let selectedTrendPoint,
+                   selectedTrendPoint.id == point.id {
                     PointMark(
-                        x: .value("Date", result.timestamp),
-                        y: .value("Overall", result.overallScore)
+                        x: .value("Date", point.date),
+                        y: .value("Overall", point.overallScore)
                     )
                     .symbolSize(120)
                     .foregroundStyle(.purple)
                 }
                 
-                if let peakRun, peakRun.id == result.id {
+                if let peakDay, peakDay.id == point.id {
                     PointMark(
-                        x: .value("Date", result.timestamp),
-                        y: .value("Overall", result.overallScore)
+                        x: .value("Date", point.date),
+                        y: .value("Overall", point.overallScore)
                     )
                     .symbolSize(90)
                     .foregroundStyle(.green)
@@ -3988,10 +4376,10 @@ struct TrendsView: View {
                     }
                 }
 
-                if let lowestRun, lowestRun.id == result.id {
+                if let lowestDay, lowestDay.id == point.id {
                     PointMark(
-                        x: .value("Date", result.timestamp),
-                        y: .value("Overall", result.overallScore)
+                        x: .value("Date", point.date),
+                        y: .value("Overall", point.overallScore)
                     )
                     .symbolSize(90)
                     .foregroundStyle(.orange)
@@ -4005,7 +4393,7 @@ struct TrendsView: View {
                     }
                 }
             }
-            .chartXScale(domain: chartDateDomain ?? (chronologicalScores.first?.timestamp ?? Date())...(chronologicalScores.last?.timestamp ?? Date()))
+            .chartXScale(domain: chartDateDomain ?? (dailyTrendPoints.first?.date ?? Date())...(dailyTrendPoints.last?.date ?? Date()))
             .frame(height: 220)
             .padding()
             .background(Color.white.opacity(0.08))
@@ -4021,15 +4409,24 @@ struct TrendsView: View {
                 }
             }
 
-            if let selectedTrendResult {
+            if let selectedTrendPoint {
                 selectedTrendInfoCard(
-                    title: "Selected Overall Run",
-                    valueText: String(format: "%.0f", selectedTrendResult.overallScore),
-                    subtitle: selectedTrendResult.deviceName,
-                    timestamp: selectedTrendResult.timestamp
+                    title: "Selected Overall Day",
+                    valueText: String(format: "%.0f", selectedTrendPoint.overallScore),
+                    subtitle: "\(selectedTrendPoint.deviceName) average",
+                    point: selectedTrendPoint,
+                    metricValue: { $0.overallScore }
                 )
             }
         }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 
     @ViewBuilder
@@ -4038,39 +4435,39 @@ struct TrendsView: View {
             Text(title)
                 .font(.headline)
 
-            Chart(chronologicalScores) { result in
+            Chart(dailyTrendPoints) { point in
                 LineMark(
-                    x: .value("Date", result.timestamp),
-                    y: .value(title, result[keyPath: keyPath])
+                    x: .value("Date", point.date),
+                    y: .value(title, point.metricValue(for: keyPath))
                 )
                 .interpolationMethod(.catmullRom)
                 .foregroundStyle(color)
 
                 // Only show the default point if not selected and not peak/low
-                if result.id != selectedTrendResult?.id,
-                   result.id != peakRun(for: keyPath)?.id,
-                   result.id != lowestRun(for: keyPath)?.id {
+                if point.id != selectedTrendPoint?.id,
+                   point.id != peakDay(for: keyPath)?.id,
+                   point.id != lowestDay(for: keyPath)?.id {
                     PointMark(
-                        x: .value("Date", result.timestamp),
-                        y: .value(title, result[keyPath: keyPath])
+                        x: .value("Date", point.date),
+                        y: .value(title, point.metricValue(for: keyPath))
                     )
                     .foregroundStyle(color)
                 }
 
-                if let selectedTrendResult,
-                   selectedTrendResult.id == result.id {
+                if let selectedTrendPoint,
+                   selectedTrendPoint.id == point.id {
                     PointMark(
-                        x: .value("Date", result.timestamp),
-                        y: .value(title, result[keyPath: keyPath])
+                        x: .value("Date", point.date),
+                        y: .value(title, point.metricValue(for: keyPath))
                     )
                     .symbolSize(120)
                     .foregroundStyle(.purple)
                 }
                 
-                if let metricPeakRun = peakRun(for: keyPath), metricPeakRun.id == result.id {
+                if let metricPeakDay = peakDay(for: keyPath), metricPeakDay.id == point.id {
                     PointMark(
-                        x: .value("Date", result.timestamp),
-                        y: .value(title, result[keyPath: keyPath])
+                        x: .value("Date", point.date),
+                        y: .value(title, point.metricValue(for: keyPath))
                     )
                     .symbolSize(90)
                     .foregroundStyle(.green)
@@ -4084,10 +4481,10 @@ struct TrendsView: View {
                     }
                 }
 
-                if let metricLowestRun = lowestRun(for: keyPath), metricLowestRun.id == result.id {
+                if let metricLowestDay = lowestDay(for: keyPath), metricLowestDay.id == point.id {
                     PointMark(
-                        x: .value("Date", result.timestamp),
-                        y: .value(title, result[keyPath: keyPath])
+                        x: .value("Date", point.date),
+                        y: .value(title, point.metricValue(for: keyPath))
                     )
                     .symbolSize(90)
                     .foregroundStyle(.orange)
@@ -4101,7 +4498,7 @@ struct TrendsView: View {
                     }
                 }
             }
-            .chartXScale(domain: chartDateDomain ?? (chronologicalScores.first?.timestamp ?? Date())...(chronologicalScores.last?.timestamp ?? Date()))
+            .chartXScale(domain: chartDateDomain ?? (dailyTrendPoints.first?.date ?? Date())...(dailyTrendPoints.last?.date ?? Date()))
             .frame(height: 180)
             .padding()
             .background(Color.white.opacity(0.08))
@@ -4117,24 +4514,41 @@ struct TrendsView: View {
                 }
             }
 
-            if let selectedTrendResult {
+            if let selectedTrendPoint {
                 selectedTrendInfoCard(
-                    title: "Selected \(title) Run",
-                    valueText: String(format: "%.0f", selectedTrendResult[keyPath: keyPath]),
-                    subtitle: selectedTrendResult.deviceName,
-                    timestamp: selectedTrendResult.timestamp
+                    title: "Selected \(title) Day",
+                    valueText: String(format: "%.0f", selectedTrendPoint.metricValue(for: keyPath)),
+                    subtitle: "\(selectedTrendPoint.deviceName) average",
+                    point: selectedTrendPoint,
+                    metricValue: { $0[keyPath: keyPath] }
                 )
             }
         }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 
     private var recentRunsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Runs")
-                .font(.headline)
-
+        trendsSectionCard(
+            title: "Recent Runs",
+            subtitle: "A quick glance at the latest individual runs behind the current trend view."
+        ) {
             ForEach(chronologicalScores.reversed().prefix(5)) { result in
-                HStack {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.14))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "waveform.path.ecg")
+                            .foregroundColor(.blue)
+                    }
+
                     VStack(alignment: .leading, spacing: 4) {
                         Text(result.deviceName)
                             .font(.headline)
@@ -4142,13 +4556,23 @@ struct TrendsView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+
                     Spacer()
+
                     Text(String(format: "%.0f", result.overallScore))
                         .font(.title3.weight(.bold))
                         .foregroundColor(.blue)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.blue.opacity(0.12))
+                        .clipShape(Capsule())
                 }
                 .padding()
                 .background(Color.white.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 16))
             }
         }
@@ -4168,7 +4592,81 @@ struct TrendsView: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.white.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func trendsFilterLabel(_ title: String) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(Color.blue.opacity(0.7))
+                .frame(width: 8, height: 8)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.primary)
+        }
+    }
+
+    private func trendsFilterButton(title: String, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundColor(.blue)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+            Spacer()
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func trendsMenuLabel(title: String, isSelected: Bool) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark")
+            }
+        }
+    }
+
+    private func trendsSectionCard<Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            content()
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
     
     private func selectOverallTrendResult(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
@@ -4186,14 +4684,14 @@ struct TrendsView: View {
             return
         }
 
-        let nearest = chronologicalScores.min {
-            let lhsDistance = abs($0.timestamp.timeIntervalSince(selectedDate)) + abs($0.overallScore - selectedValue) * 120
-            let rhsDistance = abs($1.timestamp.timeIntervalSince(selectedDate)) + abs($1.overallScore - selectedValue) * 120
+        let nearest = dailyTrendPoints.min {
+            let lhsDistance = abs($0.date.timeIntervalSince(selectedDate)) + abs($0.overallScore - selectedValue) * 120
+            let rhsDistance = abs($1.date.timeIntervalSince(selectedDate)) + abs($1.overallScore - selectedValue) * 120
             return lhsDistance < rhsDistance
         }
 
-        selectedTrendResultID = nearest?.id
-        if selectedTrendResultID != nil {
+        selectedTrendDate = nearest?.date
+        if selectedTrendDate != nil {
             Haptics.light()
         }
     }
@@ -4218,38 +4716,42 @@ struct TrendsView: View {
             return
         }
 
-        let nearest = chronologicalScores.min {
-            let lhsDistance = abs($0.timestamp.timeIntervalSince(selectedDate)) + abs($0[keyPath: keyPath] - selectedValue) * 120
-            let rhsDistance = abs($1.timestamp.timeIntervalSince(selectedDate)) + abs($1[keyPath: keyPath] - selectedValue) * 120
+        let nearest = dailyTrendPoints.min {
+            let lhsDistance = abs($0.date.timeIntervalSince(selectedDate)) + abs($0.metricValue(for: keyPath) - selectedValue) * 120
+            let rhsDistance = abs($1.date.timeIntervalSince(selectedDate)) + abs($1.metricValue(for: keyPath) - selectedValue) * 120
             return lhsDistance < rhsDistance
         }
 
-        selectedTrendResultID = nearest?.id
-        if selectedTrendResultID != nil {
+        selectedTrendDate = nearest?.date
+        if selectedTrendDate != nil {
             Haptics.light()
         }
     }
 
     @ViewBuilder
-    private func selectedTrendInfoCard(title: String, valueText: String, subtitle: String, timestamp: Date) -> some View {
+    private func selectedTrendInfoCard(
+        title: String,
+        valueText: String,
+        subtitle: String,
+        point: DailyTrendPoint,
+        metricValue: @escaping (BenchmarkResult) -> Double
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(title)
-                    .font(.headline)
-
-                Spacer()
-
-                Text("Selected")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.purple)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.purple.opacity(0.14))
-                    .clipShape(Capsule())
-            }
-
-            HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(title)
+                            .font(.headline)
+
+                        Text("Selected")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.purple)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.purple.opacity(0.14))
+                            .clipShape(Capsule())
+                    }
+
                     Text(valueText)
                         .font(.title3.weight(.bold))
                         .foregroundColor(.blue)
@@ -4258,8 +4760,12 @@ struct TrendsView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.secondary)
 
-                    Text(timestamp.formatted(date: .abbreviated, time: .shortened))
+                    Text(point.date.formatted(date: .abbreviated, time: .omitted))
                         .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Text("\(point.runs.count) run\(point.runs.count == 1 ? "" : "s")")
+                        .font(.caption.weight(.semibold))
                         .foregroundColor(.secondary)
                 }
 
@@ -4272,6 +4778,42 @@ struct TrendsView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
+
+            Divider()
+
+            ForEach(point.runs.sorted(by: { $0.timestamp > $1.timestamp })) { result in
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(result.timestamp.formatted(date: .omitted, time: .shortened))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.primary)
+                        Text(result.benchmarkIntensity)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    Text(String(format: "%.0f", metricValue(result)))
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.blue)
+
+                    if point.runs.count > 1 {
+                        Button {
+                            openTrendResultInHistory(result)
+                        } label: {
+                            Label("Open", systemImage: "arrow.up.forward.app")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(Color.white.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -4280,8 +4822,15 @@ struct TrendsView: View {
     }
 
     private func openSelectedTrendResultInHistory() {
-        guard let selectedTrendResult else { return }
-        pendingHistorySelection = selectedTrendResult.id
+        guard let selectedTrendPoint,
+              let result = selectedTrendPoint.runs.max(by: { $0.timestamp < $1.timestamp }) else { return }
+        pendingHistorySelection = result.id
+        selectedTab = "history"
+        Haptics.light()
+    }
+
+    private func openTrendResultInHistory(_ result: BenchmarkResult) {
+        pendingHistorySelection = result.id
         selectedTab = "history"
         Haptics.light()
     }
@@ -4469,69 +5018,448 @@ struct MetadataEditorView: View {
 }
 
 struct ReferenceDevicesView: View {
-    private let referenceSections: [(title: String, rows: [(String, String)])] = [
-        (
-            "iPhone",
-            [
-                ("iPhone 12", "~300 to 430 overall"),
-                ("iPhone 13 Pro Max", "~430 to 560 overall"),
-                ("iPhone 14 Pro Max", "~520 to 650 overall"),
-                ("Recent Pro iPhone", "~550 to 760 overall"),
-                ("Recent Pro Max iPhone", "~700 to 950 overall")
+    let scores: [BenchmarkResult]
+    @State private var selectedResultID: BenchmarkResult.ID?
+    @State private var isShowingResultPicker: Bool = false
+    @State private var resultSearchText: String = ""
+
+    private let referenceSections: [ReferenceSection] = [
+        ReferenceSection(
+            title: "iPhone",
+            rows: [
+                ReferenceEntry(name: "iPhone 12", rangeText: "~300 to 430 overall", lowerBound: 300, upperBound: 430),
+                ReferenceEntry(name: "iPhone 13 Pro Max", rangeText: "~430 to 560 overall", lowerBound: 430, upperBound: 560),
+                ReferenceEntry(name: "iPhone 14 Pro Max", rangeText: "~520 to 650 overall", lowerBound: 520, upperBound: 650),
+                ReferenceEntry(name: "Recent Pro iPhone", rangeText: "~550 to 760 overall", lowerBound: 550, upperBound: 760),
+                ReferenceEntry(name: "Recent Pro Max iPhone", rangeText: "~700 to 950 overall", lowerBound: 700, upperBound: 950)
             ]
         ),
-        (
-            "iPad",
-            [
-                ("iPad mini / standard iPad", "~350 to 520 overall"),
-                ("iPad Air", "~450 to 650 overall"),
-                ("iPad Pro 11-inch (M1)", "~620 to 760 overall"),
-                ("iPad Pro M-class", "~700 to 950 overall")
+        ReferenceSection(
+            title: "iPad",
+            rows: [
+                ReferenceEntry(name: "iPad mini / standard iPad", rangeText: "~350 to 520 overall", lowerBound: 350, upperBound: 520),
+                ReferenceEntry(name: "iPad Air", rangeText: "~450 to 650 overall", lowerBound: 450, upperBound: 650),
+                ReferenceEntry(name: "iPad Pro 11-inch (M1)", rangeText: "~620 to 760 overall", lowerBound: 620, upperBound: 760),
+                ReferenceEntry(name: "iPad Pro M-class", rangeText: "~700 to 950 overall", lowerBound: 700, upperBound: 950)
             ]
         ),
-        (
-            "Mac",
-            [
-                ("MacBook Air M1/M2", "~750 to 1000 overall"),
-                ("MacBook Pro / Mac mini M-class", "~850 to 1150 overall"),
-                ("High-end Apple silicon Mac", "~1000+ overall")
+        ReferenceSection(
+            title: "Mac",
+            rows: [
+                ReferenceEntry(name: "MacBook Air M1/M2", rangeText: "~750 to 1000 overall", lowerBound: 750, upperBound: 1000),
+                ReferenceEntry(name: "MacBook Pro / Mac mini M-class", rangeText: "~850 to 1150 overall", lowerBound: 850, upperBound: 1150),
+                ReferenceEntry(name: "High-end Apple silicon Mac", rangeText: "~1000+ overall", lowerBound: 1000, upperBound: nil)
             ]
         )
     ]
 
+    private var sortedScores: [BenchmarkResult] {
+        scores.sorted(by: { $0.timestamp > $1.timestamp })
+    }
+
+    private var selectedResult: BenchmarkResult? {
+        if let selectedResultID {
+            return sortedScores.first(where: { $0.id == selectedResultID })
+        }
+        return sortedScores.first
+    }
+
+    private var filteredScores: [BenchmarkResult] {
+        let trimmedSearch = resultSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearch.isEmpty else { return sortedScores }
+
+        return sortedScores.filter { result in
+            result.deviceName.localizedCaseInsensitiveContains(trimmedSearch)
+            || result.benchmarkIntensity.localizedCaseInsensitiveContains(trimmedSearch)
+            || result.timestamp.formatted(date: .abbreviated, time: .shortened).localizedCaseInsensitiveContains(trimmedSearch)
+            || String(format: "%.0f", result.overallScore).localizedCaseInsensitiveContains(trimmedSearch)
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Text("These reference ranges are broad guidance based on this app’s calibrated scoring model. They are intended to help users interpret results more fairly across different device classes.")
-                        .foregroundColor(.secondary)
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    referenceHero
 
-                ForEach(referenceSections, id: \.title) { section in
-                    Section(section.title) {
-                        ForEach(section.rows, id: \.0) { row in
-                            HStack {
-                                Text(row.0)
-                                Spacer()
-                                Text(row.1)
-                                    .foregroundColor(.secondary)
+                    if sortedScores.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "iphone.gen3")
+                                .font(.system(size: 34))
+                                .foregroundColor(.blue)
+                            Text("No saved results yet")
+                                .font(.headline)
+                            Text("Run a benchmark first, then return here to compare one of your saved results against the built-in reference ranges.")
+                                .font(.callout)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(24)
+                        .frame(maxWidth: .infinity)
+                        .background(BencherTheme.cardGradient)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                    } else {
+                        resultPickerCard
+
+                        if let selectedResult {
+                            selectedResultSummary(selectedResult)
+
+                            ForEach(referenceSections) { section in
+                                referenceSectionCard(section, selectedResult: selectedResult)
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Reference")
+            .onAppear {
+                if selectedResultID == nil {
+                    selectedResultID = sortedScores.first?.id
+                }
+            }
+            .onChange(of: sortedScores.map(\.id)) { _, ids in
+                if let selectedResultID, !ids.contains(selectedResultID) {
+                    self.selectedResultID = ids.first
+                } else if self.selectedResultID == nil {
+                    self.selectedResultID = ids.first
+                }
+            }
+            .sheet(isPresented: $isShowingResultPicker) {
+                NavigationStack {
+                    List {
+                        Section("Historic Results") {
+                            ForEach(filteredScores) { result in
+                                Button {
+                                    selectedResultID = result.id
+                                    isShowingResultPicker = false
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(result.deviceName)
+                                                .font(.headline)
+                                                .foregroundColor(.primary)
+                                            Text("\(String(format: "%.0f", result.overallScore)) overall")
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundColor(.blue)
+                                            Text(result.timestamp.formatted(date: .abbreviated, time: .shortened))
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+
+                                        Spacer()
+
+                                        if selectedResultID == result.id {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(.blue)
+                                        }
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .navigationTitle("Choose Result")
+                    .searchable(text: $resultSearchText, prompt: "Search device, score, date or mode")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Close") {
+                                isShowingResultPicker = false
                             }
                         }
                     }
                 }
             }
-            .navigationTitle("Reference Devices")
         }
     }
+
+    private var referenceHero: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Compare Against Reference Devices")
+                .font(.largeTitle.bold())
+            Text("Choose one of your saved benchmark runs, then see how its overall score stacks up against broad reference bands for different Apple device classes.")
+                .font(.callout)
+                .foregroundColor(.secondary)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BencherTheme.cardGradient)
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+
+    private var resultPickerCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Historic Result")
+                .font(.headline)
+            Button {
+                resultSearchText = ""
+                isShowingResultPicker = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                        .foregroundColor(.blue)
+                    Text(selectedResult.map(referencePickerLabel(for:)) ?? "Choose a historic result")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+
+            Text("Reference ranges are broad guidance based on this app’s calibrated scoring model. They are intended to help interpret saved runs more fairly across different device classes.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func selectedResultSummary(_ result: BenchmarkResult) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(String(format: "%.0f", result.overallScore))
+                        .font(.system(size: 42, weight: .bold))
+                        .foregroundColor(.blue)
+                    Text("Selected Overall Score")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 8) {
+                    referenceChip(result.deviceName, tint: .blue)
+                    referenceChip(result.benchmarkIntensity, tint: .green)
+                }
+            }
+
+            Text(result.timestamp.formatted(date: .complete, time: .shortened))
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func referenceSectionCard(_ section: ReferenceSection, selectedResult: BenchmarkResult) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(section.title)
+                .font(.headline)
+
+            ForEach(section.rows) { row in
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(row.name)
+                            .font(.subheadline.weight(.semibold))
+                        Text(row.rangeText)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(referenceComparisonText(for: selectedResult.overallScore, reference: row))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundColor(referenceComparisonColor(for: selectedResult.overallScore, reference: row))
+                        Text(referenceComparisonCaption(for: selectedResult.overallScore, reference: row))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(14)
+                .background(Color.white.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(referenceComparisonColor(for: selectedResult.overallScore, reference: row).opacity(0.18), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func referenceComparisonText(for score: Double, reference: ReferenceEntry) -> String {
+        if score < reference.lowerBound {
+            return String(format: "%.0f below", reference.lowerBound - score)
+        }
+        if let upperBound = reference.upperBound, score > upperBound {
+            return String(format: "%.0f above", score - upperBound)
+        }
+        return "Within band"
+    }
+
+    private func referenceComparisonCaption(for score: Double, reference: ReferenceEntry) -> String {
+        if score < reference.lowerBound {
+            return "Below this reference"
+        }
+        if let upperBound = reference.upperBound, score > upperBound {
+            return "Above this reference"
+        }
+        return "Comparable range"
+    }
+
+    private func referenceComparisonColor(for score: Double, reference: ReferenceEntry) -> Color {
+        if score < reference.lowerBound {
+            return .orange
+        }
+        if let upperBound = reference.upperBound, score > upperBound {
+            return .green
+        }
+        return .blue
+    }
+
+    private func referencePickerLabel(for result: BenchmarkResult) -> String {
+        "\(result.deviceName) • \(String(format: "%.0f", result.overallScore)) • \(result.timestamp.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    private func referenceChip(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundColor(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(tint.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+}
+
+private struct ReferenceSection: Identifiable {
+    let id = UUID()
+    let title: String
+    let rows: [ReferenceEntry]
+}
+
+private struct ReferenceEntry: Identifiable {
+    let id = UUID()
+    let name: String
+    let rangeText: String
+    let lowerBound: Double
+    let upperBound: Double?
 }
 
 // MARK: - Updates View
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.60",
+            title: "Reference and Compare Search Improvements",
+            releaseDate: "Current Build",
+            changes: [
+                "Added searchable result selection to the Compare flow so large benchmark histories can be narrowed by device, score, date or mode.",
+                "Reworked the Reference tab result picker into a dedicated searchable chooser for better long-term scalability with many saved runs.",
+                "Restored the native searchable presentation for those picker flows after confirming the earlier lag was mainly a debug-time Xcode issue.",
+                "Improved result-picking usability across comparison-focused screens without changing comparison logic or saved benchmark data."
+            ]
+        ),
+        AppUpdateEntry(
+            version: "V0.59",
+            title: "Reference Tab Comparison Redesign",
+            releaseDate: "Previous Build",
+            changes: [
+                "Replaced the old static Reference Devices page with a comparison view that lets you choose a saved historic benchmark result.",
+                "Added selected-result summary presentation in Reference so the chosen run’s score, device and benchmark mode stay visible while comparing.",
+                "Added broad reference-band comparisons for iPhone, iPad and Mac ranges so saved results can be judged against practical device classes more directly.",
+                "Improved the Reference tab from passive guidance into a more useful analysis surface tied to your own benchmark history."
+            ]
+        ),
+        AppUpdateEntry(
+            version: "V0.58",
+            title: "Benchmark Tab Visual Refresh",
+            releaseDate: "Previous Build",
+            changes: [
+                "Redesigned the Benchmark tab with a stronger hero section, clearer progress presentation and improved visual hierarchy.",
+                "Added a more polished status strip for benchmark intensity, stability runs and current run state.",
+                "Improved live-results presentation so score cards and progress sections feel more intentional and easier to scan.",
+                "Kept benchmark logic unchanged while making the Benchmark tab feel more polished and product-like."
+            ]
+        ),
+        AppUpdateEntry(
+            version: "V0.57",
+            title: "Trends Presentation and Daily Result Refinements",
+            releaseDate: "Previous Build",
+            changes: [
+                "Grouped Trends device and time-range controls into a single cleaner control panel with clearer filter labelling.",
+                "Improved Trends section-card styling so summaries, charts and recent-run areas feel more cohesive visually.",
+                "Refined selected-day presentation so same-day grouped points can show all runs from that day in a cleaner expanded layout.",
+                "Improved the overall Trends tab polish without changing chart calculations or benchmark data handling."
+            ]
+        ),
+        AppUpdateEntry(
+            version: "V0.56",
+            title: "Power State History Tracking and Filtering",
+            releaseDate: "Previous Build",
+            changes: [
+                "Added saved power-state awareness so benchmark runs can record whether the device was on AC power when the run was captured.",
+                "Added AC-power visibility in detailed historic result views for stronger result context.",
+                "Added a new History secondary filter for power state alongside device, intensity and thermal filters.",
+                "Extended benchmark import and export support so saved power-state information remains portable."
+            ]
+        ),
+        AppUpdateEntry(
+            version: "V0.55",
+            title: "Trends Daily Aggregation and Same-Day Drilldown",
+            releaseDate: "Previous Build",
+            changes: [
+                "Changed Trends charts so multiple benchmark runs on the same day are grouped into one daily average point instead of clumping or laddering.",
+                "Updated selected Trend points to represent the day-average score for that date rather than only one underlying run.",
+                "Added day-level drilldown so selecting a grouped day can still show every individual run captured on that date.",
+                "Improved the path from grouped trend selection back into History so individual same-day runs remain accessible."
+            ]
+        ),
+        AppUpdateEntry(
+            version: "V0.54",
+            title: "Benchmark Styling Simplification and History Menu Stability",
+            releaseDate: "Previous Build",
+            changes: [
+                "Removed the old full-screen benchmark gradient background so the Benchmark tab now respects the app’s light and dark appearance more naturally.",
+                "Updated benchmark cards and summary surfaces to use cleaner adaptive materials instead of the older gradient-heavy presentation.",
+                "Refined History filter and action menus to reduce UIKit context-menu warnings seen during first interaction in development builds.",
+                "Improved visual consistency and interaction stability across Benchmark and History without changing saved results or benchmark scoring."
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.53",
             title: "Trends Time-Range Controls and Selection Accuracy",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Added Trends time-range filtering with 7D, 1M, 3M, 6M, 1Y and All options.",
                 "Updated Trends chart scaling so changing the selected time range also updates the visible chart domain.",
@@ -4586,7 +5514,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.49",
             title: "History Layout Adaptation for iPhone and iPad",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Updated the History header area so controls now scroll away naturally with content on iPhone instead of staying fixed at the top.",
                 "Added a more compact iPhone-only History header layout with tighter title, control and chip spacing.",
@@ -4597,7 +5525,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.48",
             title: "History Selection Styling and iPad Detail Polish",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Replaced the default iPad blue List selection highlight with a softer custom selection treatment.",
                 "Added a subtle border glow, shadow and lift effect to the selected History row for a more premium feel.",
@@ -4608,7 +5536,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.47",
             title: "History Row Card Polish",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Redesigned History rows into richer card-style layouts with stronger hierarchy for score, device, date and status information.",
                 "Added reusable History status chips and tag chips for a cleaner, more glanceable presentation.",
@@ -4619,7 +5547,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.46",
             title: "Detailed Result View Visual Alignment",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Polished the detailed benchmark result view so it now visually aligns more closely with the upgraded History rows.",
                 "Upgraded the result summary card with clearer hero styling, richer status chips and improved metadata presentation.",
@@ -4630,7 +5558,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.45",
             title: "Import Transparency and Better Result Messaging",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Improved import completion messaging so the pop-up now shows how many results were newly added versus ignored as duplicates.",
                 "Made history import behaviour more transparent when importing files that overlap with locally stored benchmark records.",
@@ -4640,7 +5568,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.44",
             title: "Shared Theme System and Visual Consistency",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Added a shared BencherTheme system for hero gradients, card gradients and accent chip gradients.",
                 "Improved visual consistency across Dashboard, History, Trends, Score Cards and detail screens.",
