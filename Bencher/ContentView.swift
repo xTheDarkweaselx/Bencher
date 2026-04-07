@@ -5112,7 +5112,7 @@ struct ReferenceDevicesView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Reference")
+            .navigationTitle("Compare")
             .onAppear {
                 if selectedResultID == nil {
                     selectedResultID = sortedScores.first?.id
