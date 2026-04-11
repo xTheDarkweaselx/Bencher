@@ -347,7 +347,7 @@ struct BenchmarkView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Benchmark Progress")
                         .font(.headline)
-                    Text(isRunning ? "Live progress updates while the current run is executing." : "Progress indicators will update here once a run starts.")
+                    Text(isRunning ? "Progress bars currently updating." : "Progress bars will update here once a run starts.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -394,7 +394,7 @@ struct BenchmarkView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Live Results")
                     .font(.headline)
-                Text("Each metric card updates as the benchmark progresses.")
+                Text("Sections will be added here as the benchmark progresses.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -676,15 +676,15 @@ struct BenchmarkView: View {
     private func summaryText(overallScore: Double) -> String {
         switch overallScore {
         case 850...:
-            return "This looks like an elite-class run for the current calibration model."
+            return "This looks like an elite-class run from current references."
         case 700..<850:
-            return "This looks like a strong high-end run with well above average overall performance."
+            return "This looks like a strong high-end run with well above average overall performance from current references."
         case 550..<700:
-            return "This looks like an upper-mid to high-end result with solid all-round performance."
+            return "This looks like an upper-mid to high-end result with solid all-round performance from current references."
         case 400..<550:
-            return "This sits in the mid-range band for the current calibration model."
+            return "This sits in the mid-range band from current references."
         default:
-            return "This result sits in the entry to lower-mid range for the current calibration model."
+            return "This result sits in the entry to lower-mid range from current references."
         }
     }
 
@@ -1063,7 +1063,7 @@ struct HistoryView: View {
                             Text("No matching history")
                                 .font(.headline)
                             
-                            Text("Try clearing your search or relaxing one of the active filters.")
+                            Text("Try clearing your search filters or running a benchmark.")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -1202,7 +1202,7 @@ struct HistoryView: View {
                 .padding()
             }
         }
-        .searchable(text: $historySearchText, prompt: "Search by device, note or tags")
+        .searchable(text: $historySearchText, prompt: "Search devices, notes or tags")
         .onChange(of: pendingAction) { _, newValue in
             guard let newValue else { return }
             handlePendingDashboardAction(newValue)
@@ -2043,35 +2043,38 @@ struct DetailedResultView: View {
             ResultMetricView(
                 title: "Single-Core Score",
                 value: result.singleCoreScore,
-                description: "Measures peak performance of a single execution thread. Higher scores indicate stronger responsiveness for lightly threaded tasks, UI work, many app interactions and workloads that cannot effectively spread across multiple cores.",
+                description: "Measures peak performance of a single execution thread (a core). A higher score in this category indicates stronger responsiveness for everday tasks from surfing the web to opening apps and running some games.",
                 deltaText: deltaText(current: result.singleCoreScore, previous: comparisonBase?.singleCoreScore)
             )
 
             ResultMetricView(
                 title: "Multi-Core Score",
                 value: result.cpuScore,
-                description: "Measures processor throughput under genuinely parallel sustained mathematical workload. This score is expected to be higher than the single-core score on modern devices because it reflects combined performance across multiple CPU cores.",
+                description: "Measures processor throughput under parallel (across multiple threads/cores) sustained mathematical workload. A higher score in this category indicates better performance and responsiveness for tasks that require a lot of CPU power, such as compiling code builds, video editing, or running AAA games.",
                 deltaText: deltaText(current: result.cpuScore, previous: comparisonBase?.cpuScore)
             )
 
             ResultMetricView(
                 title: "Memory Score",
                 value: result.memoryScore,
-                description: "Measures memory handling throughput using large in-memory arrays and repeated transformation work. Higher scores suggest stronger bandwidth and lower overhead during memory-heavy tasks. Raw throughput: \(String(format: "%.0f", result.memoryRawThroughputMBps)) MB/s.",
+                description:
+                    Text("Measures memory handling throughput using large in-memory arrays and repeated transformation work. A higher score in this category indicates better OS/device memory handling and responsiveness for tasks that require a lot of memory, such as video editing, video rendering, ")
+                    + Text("Google Chrome").italic()
+                    + Text(" and some machine learning tasks. Raw throughput: \(String(format: "%.0f", result.memoryRawThroughputMBps)) MB/s."),
                 deltaText: deltaText(current: result.memoryScore, previous: comparisonBase?.memoryScore)
             )
 
             ResultMetricView(
                 title: "SSD Speed Score",
                 value: result.ssdScore,
-                description: "Measures temporary file write and read performance using local app storage. Higher scores suggest stronger storage responsiveness for file-heavy operations, caching and export workflows. Raw combined speed: \(String(format: "%.0f", result.ssdRawCombinedMBps)) MB/s. Raw read/write: \(String(format: "%.0f", result.ssdRawReadMBps))/\(String(format: "%.0f", result.ssdRawWriteMBps)) MB/s.",
+                description: "Measures temporary file write and read performance using local device storage. A higher score indicates better read/write performance and responsiveness for tasks that require a lot of disk access, such as video editing, AAA gaming, launch times for the OS and applications. Raw combined speed: \(String(format: "%.0f", result.ssdRawCombinedMBps)) MB/s. Raw read/write: \(String(format: "%.0f", result.ssdRawReadMBps))/\(String(format: "%.0f", result.ssdRawWriteMBps)) MB/s.",
                 deltaText: deltaText(current: result.ssdScore, previous: comparisonBase?.ssdScore)
             )
 
             ResultMetricView(
                 title: "Graphics Score",
                 value: result.graphicsScore,
-                description: "Measures repeated off-screen rendering performance. Higher scores suggest stronger rendering capability for animations, visual effects and graphically intensive interfaces.",
+                description: "Measures repeated off-screen rendering performance. A higher score indicates better performance and responsiveness for tasks that require a lot of graphics, such as animations, games, visual effects and graphically intensive UIs.",
                 deltaText: deltaText(current: result.graphicsScore, previous: comparisonBase?.graphicsScore)
             )
             
@@ -2381,8 +2384,22 @@ struct DetailedResultView: View {
 struct ResultMetricView: View {
     let title: String
     let value: Double
-    let description: String
+    let description: Text
     let deltaText: String?
+
+    init(title: String, value: Double, description: String, deltaText: String?) {
+        self.title = title
+        self.value = value
+        self.description = Text(description)
+        self.deltaText = deltaText
+    }
+
+    init(title: String, value: Double, description: Text, deltaText: String?) {
+        self.title = title
+        self.value = value
+        self.description = description
+        self.deltaText = deltaText
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2400,7 +2417,7 @@ struct ResultMetricView: View {
                     .foregroundColor(deltaText.contains("+") ? .green : .orange)
             }
 
-            Text(description)
+            description
                 .font(.callout)
                 .foregroundColor(.gray)
         }
@@ -3496,12 +3513,12 @@ struct CompareSelectionView: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Select two benchmark runs to compare. Search by device, score, date or mode to narrow large histories quickly.")
+                    Text("Select two benchmark runs to compare. Search by device, score, date or mode")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
 
-                Section("Select exactly two results") {
+                Section("Select two results") {
                     ForEach(filteredScores) { result in
                         Button {
                             toggleSelection(for: result.id)
@@ -3529,7 +3546,7 @@ struct CompareSelectionView: View {
                 }
             }
             .navigationTitle("Compare Results")
-            .searchable(text: $searchText, prompt: "Search device, score, date or mode")
+            .searchable(text: $searchText, prompt: "Search devices, scores, dates or modes")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") {
@@ -5039,8 +5056,9 @@ struct ReferenceDevicesView: View {
             rows: [
                 ReferenceEntry(name: "iPad mini / standard iPad", rangeText: "~350 to 520 overall", lowerBound: 350, upperBound: 520),
                 ReferenceEntry(name: "iPad Air", rangeText: "~450 to 650 overall", lowerBound: 450, upperBound: 650),
-                ReferenceEntry(name: "iPad Pro 11-inch (M1)", rangeText: "~620 to 760 overall", lowerBound: 620, upperBound: 760),
-                ReferenceEntry(name: "iPad Pro M-class", rangeText: "~700 to 950 overall", lowerBound: 700, upperBound: 950)
+                ReferenceEntry(name: "iPad Pro 11/13-inch (M1)", rangeText: "~620 to 760 overall", lowerBound: 620, upperBound: 760),
+                ReferenceEntry(name: "iPad Pro 11/13-inch (M2/M3)", rangeText: "~700 to 1000 overall", lowerBound: 700, upperBound: 1000),
+                ReferenceEntry(name: "iPad Pro 11/13-inch (M4)", rangeText: "~1000 to 1350 overall", lowerBound: 1000, upperBound: 1350)
             ]
         ),
         ReferenceSection(
@@ -5223,7 +5241,7 @@ struct ReferenceDevicesView: View {
             }
             .buttonStyle(.plain)
 
-            Text("Reference ranges are broad guidance based on this app’s calibrated scoring model. They are intended to help interpret saved runs more fairly across different device classes.")
+            Text("Reference ranges are broad guidance based on current references. They are not intended to be used as a strict comparison.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -5380,9 +5398,18 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.61",
+            title: "Sheen and Polish",
+            releaseDate: "Current Build",
+            changes: [
+                "Changed descriptions of functions to make them more consistent with the rest of the app.",
+                "Reworked descriptions to make them more user-friendly and less programmer-esque language.",
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.60",
             title: "Reference and Compare Search Improvements",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Added searchable result selection to the Compare flow so large benchmark histories can be narrowed by device, score, date or mode.",
                 "Reworked the Reference tab result picker into a dedicated searchable chooser for better long-term scalability with many saved runs.",
@@ -5503,7 +5530,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.50",
             title: "Phase 3 Visual Polish Completion",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Completed the Phase 3 polish pass across Benchmark, Dashboard, History, Trends and detailed result views.",
                 "Improved the overall app feel with more consistent cards, chips, gradients, haptics and feedback patterns.",
@@ -5938,7 +5965,7 @@ struct DashboardView: View {
                     Text("Your Briefing")
                         .font(.largeTitle.bold())
 
-                    Text("Your benchmark home screen for the latest result, quick actions and recent performance movement.")
+                    Text("Welcome to Bencher, your one-stop shop for performance benchmarking, comparisons and better design :p")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
