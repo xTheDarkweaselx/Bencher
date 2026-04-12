@@ -794,6 +794,38 @@ struct BenchmarkView: View {
     }
 }
 
+// MARK: - Glass Card Modifier
+private struct GlassCardModifier: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        content
+            .background(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.10), radius: 14, x: 0, y: 8)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        #else
+        content
+            .background(BencherTheme.cardGradient)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        #endif
+    }
+}
+
+private extension View {
+    func glassCard(cornerRadius: CGFloat = 18) -> some View {
+        modifier(GlassCardModifier(cornerRadius: cornerRadius))
+    }
+}
+
 // MARK: - History View
 struct HistoryView: View {
     @Binding var scores: [BenchmarkResult]
@@ -834,6 +866,7 @@ struct HistoryView: View {
     @State private var isShowingExportOptions: Bool = false
     @State private var latestCompletedResult: BenchmarkResult? = nil
     @State private var compactPresentedResult: BenchmarkResult? = nil
+    @State private var macHistoryFilterScrollIndex: Int = 0
     
     private var sortedScores: [BenchmarkResult] {
         switch sortOption {
@@ -895,312 +928,104 @@ struct HistoryView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                Section {
-                    HStack(alignment: .center, spacing: 8) {
-                        Text("History")
-                            .font(horizontalSizeClass == .compact ? .title.bold() : .title.bold())
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+        Group {
+            #if targetEnvironment(macCatalyst)
+            NavigationStack {
+                HStack(spacing: 0) {
+                    historySidebarContent
+                        .frame(width: 360)
 
-                        Spacer(minLength: 6)
+                    Divider()
 
-                        Button {
-                            launchCompareFlow()
+                    historyDetailContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+                .navigationTitle("")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Section("Actions") {
+                                Button {
+                                    openMetadataEditor()
+                                } label: {
+                                    Label("Edit Notes & Tags", systemImage: "pencil.and.list.clipboard")
+                                }
+                                .disabled(selectedResult == nil)
+
+                                Button {
+                                    presentHistoryImporter()
+                                } label: {
+                                    Label("Import", systemImage: "square.and.arrow.down")
+                                }
+
+                                Button {
+                                    presentMultiDelete()
+                                } label: {
+                                    Label("Multi-Delete", systemImage: "checklist")
+                                }
+                                .disabled(sortedScores.isEmpty)
+                            }
+
+                            Section {
+                                Button(role: .destructive) {
+                                    presentDeleteAllConfirmation()
+                                } label: {
+                                    Label("Delete All History", systemImage: "trash")
+                                }
+                                .disabled(sortedScores.isEmpty)
+                            }
                         } label: {
-                            if horizontalSizeClass == .compact {
-                                Image(systemName: "rectangle.split.2x1")
-                                    .font(.headline)
-                                    .frame(width: 34, height: 34)
-                            } else {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "rectangle.split.2x1")
-                                    Text("Compare")
-                                        .lineLimit(1)
-                                        .fixedSize(horizontal: true, vertical: false)
-                                }
-                                .font(.caption.weight(.semibold))
-                                .frame(height: 30)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.mini)
-                        .disabled(filteredSortedScores.count < 2)
-
-                        Button {
-                            if !sortedScores.isEmpty {
-                                isShowingExportOptions = true
-                            } else {
-                                historyTransferMessage = "There are no benchmark results to export yet."
-                                isShowingTransferAlert = true
-                            }
-                        } label: {
-                            if horizontalSizeClass == .compact {
-                                Image(systemName: "square.and.arrow.up")
-                                    .font(.headline)
-                                    .frame(width: 34, height: 34)
-                            } else {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "square.and.arrow.up")
-                                    Text("Export")
-                                        .lineLimit(1)
-                                        .fixedSize(horizontal: true, vertical: false)
-                                }
-                                .font(.caption.weight(.semibold))
-                                .frame(height: 30)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.mini)
-                        .disabled(sortedScores.isEmpty || isPreparingExport)
-                    }
-                    .padding(.top, horizontalSizeClass == .compact ? 0 : 4)
-                    
-                    Picker("Sort", selection: $sortOption) {
-                        ForEach(HistorySortOption.allCases) { option in
-                            Text(option.title).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .controlSize(horizontalSizeClass == .compact ? .small : .regular)
-                    
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: horizontalSizeClass == .compact ? 8 : 10) {
-                            Menu {
-                                ForEach(historyDevices, id: \.self) { device in
-                                    Button {
-                                        selectedDeviceHistoryFilter = device
-                                    } label: {
-                                        historyMenuLabel(title: device, isSelected: selectedDeviceHistoryFilter == device)
-                                    }
-                                }
-                            } label: {
-                                filterChip(title: selectedDeviceHistoryFilter, systemImage: "iphone")
-                            }
-                            
-                            Menu {
-                                ForEach(historyBenchmarkIntensities, id: \.self) { intensity in
-                                    Button {
-                                        selectedBenchmarkHistoryFilter = intensity
-                                    } label: {
-                                        historyMenuLabel(title: intensity, isSelected: selectedBenchmarkHistoryFilter == intensity)
-                                    }
-                                }
-                            } label: {
-                                filterChip(title: selectedBenchmarkHistoryFilter, systemImage: "dial.medium")
-                            }
-                            
-                            Menu {
-                                ForEach(historyThermalFilters, id: \.self) { thermal in
-                                    Button {
-                                        selectedThermalHistoryFilter = thermal
-                                    } label: {
-                                        historyMenuLabel(title: thermal, isSelected: selectedThermalHistoryFilter == thermal)
-                                    }
-                                }
-                            } label: {
-                                filterChip(title: selectedThermalHistoryFilter, systemImage: "thermometer.medium")
-                            }
-
-                            Menu {
-                                ForEach(historyPowerFilters, id: \.self) { power in
-                                    Button {
-                                        selectedPowerHistoryFilter = power
-                                    } label: {
-                                        historyMenuLabel(title: power, isSelected: selectedPowerHistoryFilter == power)
-                                    }
-                                }
-                            } label: {
-                                filterChip(title: selectedPowerHistoryFilter, systemImage: "powerplug")
-                            }
-                            
-                            Button {
-                                favouritesOnly.toggle()
-                            } label: {
-                                filterChip(
-                                    title: favouritesOnly ? "Favourites" : "All Runs",
-                                    systemImage: favouritesOnly ? "star.fill" : "star"
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    
-                    if !recentlyDeletedResults.isEmpty {
-                        HStack(spacing: 12) {
-                            Image(systemName: "arrow.uturn.backward.circle.fill")
-                                .foregroundColor(.blue)
-                            
-                            Text(
-                                recentlyDeletedResults.count == 1
-                                ? "Last deleted history item can be restored."
-                                : "Last deleted set of \(recentlyDeletedResults.count) history items can be restored."
-                            )
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            Button("Undo") {
-                                restoreRecentlyDeleted()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                        }
-                    }
-                }
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-                
-                if filteredSortedScores.isEmpty {
-                    Section {
-                        VStack(spacing: 12) {
-                            Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                                .font(.system(size: 34))
-                                .foregroundColor(.secondary)
-                            
-                            Text("No matching history")
-                                .font(.headline)
-                            
-                            Text("Try clearing your search filters or running a benchmark.")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                    }
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                } else {
-                    ForEach(filteredSortedScores) { result in
-                        historyRowCard(for: result)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                deleteResult(result)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button {
-                                togglePinned(result)
-                            } label: {
-                                Label(result.isPinned ? "Unfavourite" : "Favourite", systemImage: result.isPinned ? "star.slash" : "star")
-                            }
-                            .tint(.yellow)
+                            Label("More", systemImage: "ellipsis.circle")
                         }
                     }
                 }
             }
-            .listStyle(.plain)
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Section("Actions") {
-                            Button {
-                                openMetadataEditor()
-                            } label: {
-                                Label("Edit Notes & Tags", systemImage: "pencil.and.list.clipboard")
-                            }
-                            .disabled(selectedResult == nil)
+            #else
+            NavigationSplitView {
+                historySidebarContent
+                    .navigationTitle("")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Menu {
+                                Section("Actions") {
+                                    Button {
+                                        openMetadataEditor()
+                                    } label: {
+                                        Label("Edit Notes & Tags", systemImage: "pencil.and.list.clipboard")
+                                    }
+                                    .disabled(selectedResult == nil)
 
-                            Button {
-                                presentHistoryImporter()
-                            } label: {
-                                Label("Import", systemImage: "square.and.arrow.down")
-                            }
+                                    Button {
+                                        presentHistoryImporter()
+                                    } label: {
+                                        Label("Import", systemImage: "square.and.arrow.down")
+                                    }
 
-                            Button {
-                                presentMultiDelete()
+                                    Button {
+                                        presentMultiDelete()
+                                    } label: {
+                                        Label("Multi-Delete", systemImage: "checklist")
+                                    }
+                                    .disabled(sortedScores.isEmpty)
+                                }
+
+                                Section {
+                                    Button(role: .destructive) {
+                                        presentDeleteAllConfirmation()
+                                    } label: {
+                                        Label("Delete All History", systemImage: "trash")
+                                    }
+                                    .disabled(sortedScores.isEmpty)
+                                }
                             } label: {
-                                Label("Multi-Delete", systemImage: "checklist")
+                                Label("More", systemImage: "ellipsis.circle")
                             }
-                            .disabled(sortedScores.isEmpty)
                         }
-
-                        Section {
-                            Button(role: .destructive) {
-                                presentDeleteAllConfirmation()
-                            } label: {
-                                Label("Delete All History", systemImage: "trash")
-                            }
-                            .disabled(sortedScores.isEmpty)
-                        }
-                    } label: {
-                        Label("More", systemImage: "ellipsis.circle")
                     }
-                }
+            } detail: {
+                historyDetailContent
             }
-        } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let historyTransferMessage {
-                        if isPreparingExport {
-                            HStack(spacing: 12) {
-                                ProgressView()
-                                    .tint(.white)
-
-                                Text("Preparing export...")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundColor(.white)
-
-                                Spacer()
-                            }
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.purple.opacity(0.7))
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                        }
-                        
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(historyTransferMessage)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Button {
-                                self.historyTransferMessage = nil
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.white.opacity(0.9))
-                                    .font(.title3)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.blue.opacity(0.7))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-
-                    if horizontalSizeClass != .compact, isShowingComparison, compareResults.count == 2 {
-                        CompareResultsView(
-                            results: compareResults,
-                            onClose: {
-                                isShowingComparison = false
-                                compareResults = []
-                            }
-                        )
-                    } else if let result = selectedResult {
-                        DetailedResultView(result: result, comparisonBase: comparisonBase(for: result))
-                    } else {
-                        VStack(spacing: 12) {
-                            Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                                .font(.system(size: 42))
-                                .foregroundColor(.secondary)
-                            Text("Select a benchmark run to view details")
-                                .font(.headline)
-                                .foregroundColor(.gray)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(.top, 60)
-                    }
-                }
-                .padding()
-            }
+            #endif
         }
         .searchable(text: $historySearchText, prompt: "Search devices, notes or tags")
         .onChange(of: pendingAction) { _, newValue in
@@ -1214,21 +1039,25 @@ struct HistoryView: View {
             pendingSelectedResultID = nil
         }
         .fullScreenCover(item: $compactPresentedResult) { result in
-            NavigationStack {
-                ScrollView {
-                    DetailedResultView(result: result, comparisonBase: comparisonBase(for: result))
-                        .padding(.top, 8)
-                        .padding(.bottom, 24)
-                }
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") {
-                            compactPresentedResult = nil
+            #if targetEnvironment(macCatalyst)
+                EmptyView()
+                #else
+                NavigationStack {
+                    ScrollView {
+                        DetailedResultView(result: result, comparisonBase: comparisonBase(for: result))
+                            .padding(.top, 8)
+                            .padding(.bottom, 24)
+                    }
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") {
+                                compactPresentedResult = nil
+                            }
                         }
                     }
                 }
-            }
+            #endif
         }
         .sheet(item: $exportShareItem) { item in
             ActivityView(activityItems: [item.url])
@@ -1385,6 +1214,320 @@ struct HistoryView: View {
             self.selectedResultID = newSorted.first?.id
         }
     }
+
+    private var historySidebarContent: some View {
+        List {
+            Section {
+                HStack(alignment: .center, spacing: 8) {
+                    Text("History")
+                        .font(horizontalSizeClass == .compact ? .title.bold() : .title.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Spacer(minLength: 6)
+
+                    Button {
+                        launchCompareFlow()
+                    } label: {
+                        if horizontalSizeClass == .compact {
+                            Image(systemName: "rectangle.split.2x1")
+                                .font(.headline)
+                                .frame(width: 34, height: 34)
+                        } else {
+                            HStack(spacing: 5) {
+                                Image(systemName: "rectangle.split.2x1")
+                                Text("Compare")
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .frame(height: 30)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .disabled(filteredSortedScores.count < 2)
+
+                    Button {
+                        if !sortedScores.isEmpty {
+                            isShowingExportOptions = true
+                        } else {
+                            historyTransferMessage = "There are no benchmark results to export yet."
+                            isShowingTransferAlert = true
+                        }
+                    } label: {
+                        if horizontalSizeClass == .compact {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.headline)
+                                .frame(width: 34, height: 34)
+                        } else {
+                            HStack(spacing: 5) {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("Export")
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .frame(height: 30)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .disabled(sortedScores.isEmpty || isPreparingExport)
+                }
+                .padding(.top, horizontalSizeClass == .compact ? 0 : 4)
+
+                Picker("Sort", selection: $sortOption) {
+                    ForEach(HistorySortOption.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .controlSize(horizontalSizeClass == .compact ? .small : .regular)
+
+                ScrollViewReader { proxy in
+                    HStack(spacing: 8) {
+                        #if targetEnvironment(macCatalyst)
+                        Button {
+                            let newIndex = max(macHistoryFilterScrollIndex - 1, 0)
+                            macHistoryFilterScrollIndex = newIndex
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(newIndex, anchor: .leading)
+                            }
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.caption.weight(.bold))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(macHistoryFilterScrollIndex == 0)
+                        #endif
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: horizontalSizeClass == .compact ? 8 : 10) {
+                                Menu {
+                                    ForEach(historyDevices, id: \.self) { device in
+                                        Button {
+                                            selectedDeviceHistoryFilter = device
+                                        } label: {
+                                            historyMenuLabel(title: device, isSelected: selectedDeviceHistoryFilter == device)
+                                        }
+                                    }
+                                } label: {
+                                    filterChip(title: selectedDeviceHistoryFilter, systemImage: "iphone")
+                                }
+                                .id(0)
+
+                                Menu {
+                                    ForEach(historyBenchmarkIntensities, id: \.self) { intensity in
+                                        Button {
+                                            selectedBenchmarkHistoryFilter = intensity
+                                        } label: {
+                                            historyMenuLabel(title: intensity, isSelected: selectedBenchmarkHistoryFilter == intensity)
+                                        }
+                                    }
+                                } label: {
+                                    filterChip(title: selectedBenchmarkHistoryFilter, systemImage: "dial.medium")
+                                }
+                                .id(1)
+
+                                Menu {
+                                    ForEach(historyThermalFilters, id: \.self) { thermal in
+                                        Button {
+                                            selectedThermalHistoryFilter = thermal
+                                        } label: {
+                                            historyMenuLabel(title: thermal, isSelected: selectedThermalHistoryFilter == thermal)
+                                        }
+                                    }
+                                } label: {
+                                    filterChip(title: selectedThermalHistoryFilter, systemImage: "thermometer.medium")
+                                }
+                                .id(2)
+
+                                Menu {
+                                    ForEach(historyPowerFilters, id: \.self) { power in
+                                        Button {
+                                            selectedPowerHistoryFilter = power
+                                        } label: {
+                                            historyMenuLabel(title: power, isSelected: selectedPowerHistoryFilter == power)
+                                        }
+                                    }
+                                } label: {
+                                    filterChip(title: selectedPowerHistoryFilter, systemImage: "powerplug")
+                                }
+                                .id(3)
+
+                                Button {
+                                    favouritesOnly.toggle()
+                                } label: {
+                                    filterChip(
+                                        title: favouritesOnly ? "Favourites" : "All Runs",
+                                        systemImage: favouritesOnly ? "star.fill" : "star"
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .id(4)
+                            }
+                        }
+
+                        #if targetEnvironment(macCatalyst)
+                        Button {
+                            let newIndex = min(macHistoryFilterScrollIndex + 1, 4)
+                            macHistoryFilterScrollIndex = newIndex
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(newIndex, anchor: .trailing)
+                            }
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(macHistoryFilterScrollIndex == 4)
+                        #endif
+                    }
+                }
+
+                if !recentlyDeletedResults.isEmpty {
+                    HStack(spacing: 12) {
+                        Image(systemName: "arrow.uturn.backward.circle.fill")
+                            .foregroundColor(.blue)
+
+                        Text(
+                            recentlyDeletedResults.count == 1
+                            ? "Last deleted history item can be restored."
+                            : "Last deleted set of \(recentlyDeletedResults.count) history items can be restored."
+                        )
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                        Spacer()
+
+                        Button("Undo") {
+                            restoreRecentlyDeleted()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+            }
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+
+            if filteredSortedScores.isEmpty {
+                Section {
+                    VStack(spacing: 12) {
+                        Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                            .font(.system(size: 34))
+                            .foregroundColor(.secondary)
+
+                        Text("No matching history")
+                            .font(.headline)
+
+                        Text("Try clearing your search filters or running a benchmark.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                }
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            } else {
+                ForEach(filteredSortedScores) { result in
+                    historyRowCard(for: result)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                deleteResult(result)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button {
+                                togglePinned(result)
+                            } label: {
+                                Label(result.isPinned ? "Unfavourite" : "Favourite", systemImage: result.isPinned ? "star.slash" : "star")
+                            }
+                            .tint(.yellow)
+                        }
+                }
+            }
+        }
+        .listStyle(.plain)
+    }
+
+    private var historyDetailContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let historyTransferMessage {
+                    if isPreparingExport {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                                .tint(.white)
+
+                            Text("Preparing export...")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.white)
+
+                            Spacer()
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.purple.opacity(0.7))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(historyTransferMessage)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Button {
+                            self.historyTransferMessage = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.white.opacity(0.9))
+                                .font(.title3)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.blue.opacity(0.7))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+
+                if horizontalSizeClass != .compact, isShowingComparison, compareResults.count == 2 {
+                    CompareResultsView(
+                        results: compareResults,
+                        onClose: {
+                            isShowingComparison = false
+                            compareResults = []
+                        }
+                    )
+                } else if let result = selectedResult {
+                    DetailedResultView(result: result, comparisonBase: comparisonBase(for: result))
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                            .font(.system(size: 42))
+                            .foregroundColor(.secondary)
+                        Text("Select a benchmark run to view details")
+                            .font(.headline)
+                            .foregroundColor(.gray)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 60)
+                }
+            }
+            .padding()
+        }
+    }
     
     @ViewBuilder
     private func historyRowCard(for result: BenchmarkResult) -> some View {
@@ -1512,15 +1655,22 @@ struct HistoryView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BencherTheme.cardGradient)
+        .glassCard(cornerRadius: 18)
         .overlay(
             RoundedRectangle(cornerRadius: 18)
                 .stroke(
-                    isSelected ? Color.blue.opacity(0.35) : Color.primary.opacity(0.06),
+                    isSelected ? Color.blue.opacity(0.35) : (
+                        {
+                            #if targetEnvironment(macCatalyst)
+                            return Color.white.opacity(0.16)
+                            #else
+                            return Color.primary.opacity(0.06)
+                            #endif
+                        }()
+                    ),
                     lineWidth: isSelected ? 1.6 : 1
                 )
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
         .shadow(
             color: isSelected ? Color.blue.opacity(0.12) : Color.clear,
             radius: isSelected ? 10 : 0,
@@ -1539,11 +1689,15 @@ struct HistoryView: View {
 
         card
             .onTapGesture {
-                if isCompact {
-                    compactPresentedResult = result
-                } else {
+                #if targetEnvironment(macCatalyst)
                     selectedResultID = result.id
-                }
+                    #else
+                    if isCompact {
+                        compactPresentedResult = result
+                    } else {
+                        selectedResultID = result.id
+                    }
+                #endif
             }
     }
     
@@ -2033,12 +2187,7 @@ struct DetailedResultView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(BencherTheme.heroGradient)
-            .overlay(
-                RoundedRectangle(cornerRadius: 18)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .glassCard(cornerRadius: 18)
 
             ResultMetricView(
                 title: "Single-Core Score",
@@ -2101,8 +2250,7 @@ struct DetailedResultView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(BencherTheme.cardGradient)
-            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .glassCard(cornerRadius: 18)
             
             VStack(alignment: .leading, spacing: 12) {
                 Text("Notes & Tags")
@@ -2134,8 +2282,7 @@ struct DetailedResultView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(BencherTheme.cardGradient)
-            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .glassCard(cornerRadius: 18)
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("Estimated Device Reference")
@@ -2151,8 +2298,7 @@ struct DetailedResultView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(BencherTheme.cardGradient)
-            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .glassCard(cornerRadius: 18)
 
             // Insights and percentile
             VStack(alignment: .leading, spacing: 10) {
@@ -2169,10 +2315,18 @@ struct DetailedResultView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(BencherTheme.cardGradient)
-            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .glassCard(cornerRadius: 18)
         }
-        .padding(.horizontal, horizontalSizeClass == .compact ? 16 : 0)
+        .padding(
+            .horizontal,
+            {
+                #if targetEnvironment(macCatalyst)
+                return 16.0
+                #else
+                return horizontalSizeClass == .compact ? 16.0 : 0.0
+                #endif
+            }()
+        )
         .padding(.vertical)
         .navigationTitle("Result")
         .toolbar {
@@ -2423,12 +2577,7 @@ struct ResultMetricView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BencherTheme.cardGradient)
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .glassCard(cornerRadius: 18)
     }
 }
 
@@ -2467,6 +2616,34 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
 
     let thermalState: Int
     let wasConnectedToPower: Bool?
+    
+    func normalizedDeviceNameIfNeeded() -> BenchmarkResult {
+        let normalizedName = DeviceModel.normalizedDisplayName(deviceName: deviceName)
+        guard normalizedName != deviceName else { return self }
+
+        return BenchmarkResult(
+            id: id,
+            sessionID: sessionID,
+            deviceName: normalizedName,
+            benchmarkIntensity: benchmarkIntensity,
+            note: note,
+            tags: tags,
+            isPinned: isPinned,
+            singleCoreScore: singleCoreScore,
+            cpuScore: cpuScore,
+            memoryScore: memoryScore,
+            memoryRawThroughputMBps: memoryRawThroughputMBps,
+            ssdScore: ssdScore,
+            ssdRawCombinedMBps: ssdRawCombinedMBps,
+            ssdRawReadMBps: ssdRawReadMBps,
+            ssdRawWriteMBps: ssdRawWriteMBps,
+            graphicsScore: graphicsScore,
+            overallScore: overallScore,
+            timestamp: timestamp,
+            thermalState: thermalState,
+            wasConnectedToPower: wasConnectedToPower
+        )
+    }
 
     init(
         id: UUID = UUID(),
@@ -2926,7 +3103,11 @@ enum BenchmarkStorage {
         }
 
         if let decoded = try? JSONDecoder().decode([BenchmarkResult].self, from: data) {
-            return decoded.sorted(by: { $0.timestamp > $1.timestamp })
+            let normalized = decoded.map { $0.normalizedDeviceNameIfNeeded() }
+            if normalized.map(\.deviceName) != decoded.map(\.deviceName) {
+                save(normalized)
+            }
+            return normalized.sorted(by: { $0.timestamp > $1.timestamp })
         }
 
         if let legacyDecoded = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
@@ -2979,7 +3160,11 @@ enum BenchmarkStorage {
                     wasConnectedToPower: item["wasConnectedToPower"] as? Bool
                 )
             }
-            return mapped.sorted(by: { $0.timestamp > $1.timestamp })
+            let normalized = mapped.map { $0.normalizedDeviceNameIfNeeded() }
+            if normalized.map(\.deviceName) != mapped.map(\.deviceName) {
+                save(normalized)
+            }
+            return normalized.sorted(by: { $0.timestamp > $1.timestamp })
         }
 
         return []
@@ -3275,19 +3460,27 @@ enum BencherTheme {
 
 enum Haptics {
     static func success() {
+        #if !targetEnvironment(macCatalyst)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+        #endif
     }
 
     static func warning() {
+        #if !targetEnvironment(macCatalyst)
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        #endif
     }
 
     static func error() {
+        #if !targetEnvironment(macCatalyst)
         UINotificationFeedbackGenerator().notificationOccurred(.error)
+        #endif
     }
 
     static func light() {
+        #if !targetEnvironment(macCatalyst)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        #endif
     }
 }
 
@@ -3296,6 +3489,47 @@ enum DeviceModel {
     static func currentDeviceName() -> String {
         let identifier = currentIdentifier()
         return friendlyName(for: identifier)
+    }
+    
+    static func normalizedDisplayName(deviceName: String) -> String {
+        let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return deviceName }
+
+        if let identifier = extractedHardwareIdentifier(from: trimmed) {
+            let resolved = friendlyName(for: identifier)
+            if resolved != identifier {
+                return resolved
+            }
+        }
+
+        return deviceName
+    }
+
+    private static func extractedHardwareIdentifier(from name: String) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let knownPrefixes = ["iPhone", "iPad", "MacBookAir", "MacBookPro", "Macmini", "iMac", "MacPro", "Mac"]
+
+        for prefix in knownPrefixes {
+            if trimmed.hasPrefix(prefix), trimmed.contains(",") {
+                if !trimmed.contains("(") {
+                    return trimmed
+                }
+
+                if let openParen = trimmed.firstIndex(of: "("),
+                   let closeParen = trimmed[openParen...].firstIndex(of: ")") {
+                    let candidate = String(trimmed[trimmed.index(after: openParen)..<closeParen])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    if candidate.hasPrefix(prefix) || knownPrefixes.contains(where: { candidate.hasPrefix($0) }) {
+                        return candidate
+                    }
+                }
+            }
+        }
+
+        return nil
     }
 
     private static func currentIdentifier() -> String {
@@ -3435,6 +3669,8 @@ enum DeviceModel {
             "Macmini9,1": "Mac mini (M1, 2020)",
             "Mac14,3": "Mac mini (M2, 2023)",
             "Mac14,12": "Mac mini (M2 Pro, 2023)",
+            "Mac16,10": "Mac mini (M4, 2024)",
+            "Mac16,11": "Mac mini (M4 Pro, 2024)",
             "Mac13,1": "Mac Studio (2022)",
             "Mac13,2": "Mac Studio (2022)",
             "Mac14,13": "Mac Studio (2023)",
@@ -3476,7 +3712,11 @@ enum DeviceModel {
             return identifier
         }
 
+        #if targetEnvironment(macCatalyst)
+        return "Mac"
+        #else
         return UIDevice.current.model
+        #endif
     }
 }
 
@@ -5182,9 +5422,18 @@ struct ReferenceDevicesView: View {
                     .searchable(text: $resultSearchText, prompt: "Search device, score, date or mode")
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
-                            Button("Close") {
+                            Button {
                                 isShowingResultPicker = false
+                            } label: {
+                                Label("Close", systemImage: "xmark")
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .frame(minWidth: 84)
                             }
+                            .buttonStyle(.bordered)
                         }
                     }
                 }
@@ -5398,9 +5647,21 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.70",
+            title: "Big Mac Energy",
+            releaseDate: "Current Build",
+            changes: [
+                "Added MacOS Catalyst support.",
+                "Added automatic update feature on device names recently added to the reference list that weren't originally",
+                "Added a history sidebar and detailed result view in MacOS like the iPadOS version.",
+                "Reworked History on MacOS to ensure the tab bar at the top is always visible.",
+                "Changed the close button in the reference tab to be a x-mark rather than text.",
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.61",
             title: "Sheen and Polish",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Changed descriptions of functions to make them more consistent with the rest of the app.",
                 "Reworked descriptions to make them more user-friendly and less programmer-esque language.",
@@ -5420,7 +5681,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.59",
             title: "Reference Tab Comparison Redesign",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Replaced the old static Reference Devices page with a comparison view that lets you choose a saved historic benchmark result.",
                 "Added selected-result summary presentation in Reference so the chosen run’s score, device and benchmark mode stay visible while comparing.",
@@ -5431,7 +5692,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.58",
             title: "Benchmark Tab Visual Refresh",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Redesigned the Benchmark tab with a stronger hero section, clearer progress presentation and improved visual hierarchy.",
                 "Added a more polished status strip for benchmark intensity, stability runs and current run state.",
@@ -5442,7 +5703,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.57",
             title: "Trends Presentation and Daily Result Refinements",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Grouped Trends device and time-range controls into a single cleaner control panel with clearer filter labelling.",
                 "Improved Trends section-card styling so summaries, charts and recent-run areas feel more cohesive visually.",
@@ -5453,7 +5714,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.56",
             title: "Power State History Tracking and Filtering",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Added saved power-state awareness so benchmark runs can record whether the device was on AC power when the run was captured.",
                 "Added AC-power visibility in detailed historic result views for stronger result context.",
@@ -5464,7 +5725,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.55",
             title: "Trends Daily Aggregation and Same-Day Drilldown",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Changed Trends charts so multiple benchmark runs on the same day are grouped into one daily average point instead of clumping or laddering.",
                 "Updated selected Trend points to represent the day-average score for that date rather than only one underlying run.",
@@ -5475,7 +5736,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.54",
             title: "Benchmark Styling Simplification and History Menu Stability",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Removed the old full-screen benchmark gradient background so the Benchmark tab now respects the app’s light and dark appearance more naturally.",
                 "Updated benchmark cards and summary surfaces to use cleaner adaptive materials instead of the older gradient-heavy presentation.",
@@ -5486,7 +5747,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.53",
             title: "Trends Time-Range Controls and Selection Accuracy",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Added Trends time-range filtering with 7D, 1M, 3M, 6M, 1Y and All options.",
                 "Updated Trends chart scaling so changing the selected time range also updates the visible chart domain.",
@@ -5501,7 +5762,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.52",
             title: "Interactive Trends and Comparison Refinements",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Added interactive Trends chart selection so tapping chart points now highlights the nearest benchmark run.",
                 "Added selected-run summary cards beneath trend charts showing the relevant metric value, device and timestamp.",
@@ -5517,7 +5778,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.51",
             title: "History Navigation and Detail View Refinements",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Refined compact History result opening so iPhone now presents detailed benchmark results more reliably again.",
                 "Replaced the broken compact History detail popup flow with a cleaner full-screen presentation for better stability and scrolling.",
