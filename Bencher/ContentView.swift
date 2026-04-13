@@ -6,9 +6,14 @@
 //
 
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 import Charts
+
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 // MARK: - Main ContentView
 struct ContentView: View {
@@ -19,6 +24,24 @@ struct ContentView: View {
     @State private var pendingHistorySelection: BenchmarkResult.ID? = nil
 
     var body: some View {
+        #if os(macOS)
+        NavigationSplitView {
+            List(selection: $selectedTab) {
+                ForEach(sidebarItems) { item in
+                    Label(item.title, systemImage: item.systemImage)
+                        .tag(item.id)
+                }
+            }
+            .navigationTitle("Bencher")
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 220)
+        } detail: {
+            selectedRootView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .navigationSplitViewStyle(.balanced)
+        .preferredColorScheme(preferredColorScheme)
+        #else
         TabView(selection: $selectedTab) {
             DashboardView(scores: scores, selectedTab: $selectedTab, pendingHistoryAction: $pendingHistoryAction)
                 .tabItem {
@@ -63,6 +86,7 @@ struct ContentView: View {
                 .tag("updates")
         }
         .preferredColorScheme(preferredColorScheme)
+        #endif
     }
 
     private var preferredColorScheme: ColorScheme? {
@@ -74,6 +98,109 @@ struct ContentView: View {
         default:
             return nil
         }
+    }
+
+    private var sidebarItems: [SidebarItem] {
+        [
+            SidebarItem(id: "dashboard", title: "Dashboard", systemImage: "square.grid.2x2"),
+            SidebarItem(id: "benchmark", title: "Benchmark", systemImage: "speedometer"),
+            SidebarItem(id: "history", title: "History", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90"),
+            SidebarItem(id: "trends", title: "Trends", systemImage: "chart.line.uptrend.xyaxis"),
+            SidebarItem(id: "reference", title: "Reference", systemImage: "iphone.gen3"),
+            SidebarItem(id: "settings", title: "Settings", systemImage: "gearshape"),
+            SidebarItem(id: "updates", title: "Updates", systemImage: "clock.badge.checkmark")
+        ]
+    }
+
+    @ViewBuilder
+    private var selectedRootView: some View {
+        switch selectedTab {
+        case "dashboard":
+            DashboardView(scores: scores, selectedTab: $selectedTab, pendingHistoryAction: $pendingHistoryAction)
+        case "benchmark":
+            BenchmarkView(scores: $scores)
+        case "history":
+            HistoryView(scores: $scores, pendingAction: $pendingHistoryAction, pendingSelectedResultID: $pendingHistorySelection)
+        case "trends":
+            TrendsView(scores: scores, selectedTab: $selectedTab, pendingHistorySelection: $pendingHistorySelection)
+        case "reference":
+            ReferenceDevicesView(scores: scores)
+        case "settings":
+            SettingsView()
+        case "updates":
+            UpdatesView()
+        default:
+            DashboardView(scores: scores, selectedTab: $selectedTab, pendingHistoryAction: $pendingHistoryAction)
+        }
+    }
+}
+
+private struct SidebarItem: Identifiable {
+    let id: String
+    let title: String
+    let systemImage: String
+}
+
+enum BencherPlatformColors {
+    static var systemBackground: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .systemBackground)
+        #elseif canImport(AppKit)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color.white
+        #endif
+    }
+
+    static var secondaryBackground: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .secondarySystemBackground)
+        #elseif canImport(AppKit)
+        Color(nsColor: .controlBackgroundColor)
+        #else
+        Color.gray.opacity(0.1)
+        #endif
+    }
+}
+
+extension ToolbarItemPlacement {
+    static var bencherTopBarLeading: ToolbarItemPlacement {
+        #if os(macOS)
+        .cancellationAction
+        #else
+        .topBarLeading
+        #endif
+    }
+
+    static var bencherTopBarTrailing: ToolbarItemPlacement {
+        #if os(macOS)
+        .primaryAction
+        #else
+        .topBarTrailing
+        #endif
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func bencherInlineTitleDisplayMode() -> some View {
+        #if os(macOS)
+        self
+        #else
+        self.navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+
+    @ViewBuilder
+    func bencherItemCover<Item: Identifiable, CoverContent: View>(
+        item: Binding<Item?>,
+        @ViewBuilder content: @escaping (Item) -> CoverContent
+    ) -> some View {
+        #if os(macOS)
+        self.sheet(item: item, content: content)
+        #else
+        self.fullScreenCover(item: item, content: content)
+        #endif
     }
 }
 
@@ -111,7 +238,7 @@ struct BenchmarkView: View {
 
     var body: some View {
         ZStack {
-            Color(.systemBackground)
+            BencherPlatformColors.systemBackground
                 .ignoresSafeArea()
 
             ScrollView {
@@ -689,6 +816,7 @@ struct BenchmarkView: View {
     }
 
     private func currentPowerConnectionState() -> Bool? {
+        #if canImport(UIKit)
         let device = UIDevice.current
         let wasMonitoringEnabled = device.isBatteryMonitoringEnabled
         device.isBatteryMonitoringEnabled = true
@@ -703,6 +831,9 @@ struct BenchmarkView: View {
         default:
             return nil
         }
+        #else
+        return nil
+        #endif
     }
 
     func cancelBenchmark() {
@@ -799,16 +930,6 @@ private struct GlassCardModifier: ViewModifier {
     let cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
-        #if targetEnvironment(macCatalyst)
-        content
-            .background(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.10), radius: 14, x: 0, y: 8)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        #else
         content
             .background(BencherTheme.cardGradient)
             .overlay(
@@ -816,7 +937,6 @@ private struct GlassCardModifier: ViewModifier {
                     .stroke(Color.primary.opacity(0.06), lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        #endif
     }
 }
 
@@ -866,8 +986,6 @@ struct HistoryView: View {
     @State private var isShowingExportOptions: Bool = false
     @State private var latestCompletedResult: BenchmarkResult? = nil
     @State private var compactPresentedResult: BenchmarkResult? = nil
-    @State private var macHistoryFilterScrollIndex: Int = 0
-    
     private var sortedScores: [BenchmarkResult] {
         switch sortOption {
         case .dateNewest:
@@ -928,290 +1046,259 @@ struct HistoryView: View {
     }
 
     var body: some View {
-        Group {
-            #if targetEnvironment(macCatalyst)
-            NavigationStack {
-                HStack(spacing: 0) {
-                    historySidebarContent
-                        .frame(width: 360)
-
-                    Divider()
-
-                    historyDetailContent
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-                .navigationTitle("")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Section("Actions") {
-                                Button {
-                                    openMetadataEditor()
-                                } label: {
-                                    Label("Edit Notes & Tags", systemImage: "pencil.and.list.clipboard")
-                                }
-                                .disabled(selectedResult == nil)
-
-                                Button {
-                                    presentHistoryImporter()
-                                } label: {
-                                    Label("Import", systemImage: "square.and.arrow.down")
-                                }
-
-                                Button {
-                                    presentMultiDelete()
-                                } label: {
-                                    Label("Multi-Delete", systemImage: "checklist")
-                                }
-                                .disabled(sortedScores.isEmpty)
-                            }
-
-                            Section {
-                                Button(role: .destructive) {
-                                    presentDeleteAllConfirmation()
-                                } label: {
-                                    Label("Delete All History", systemImage: "trash")
-                                }
-                                .disabled(sortedScores.isEmpty)
-                            }
-                        } label: {
-                            Label("More", systemImage: "ellipsis.circle")
-                        }
-                    }
-                }
+        historyContainer
+            .searchable(text: $historySearchText, prompt: "Search devices, notes or tags")
+            .onChange(of: pendingAction) { _, newValue in
+                guard let newValue else { return }
+                handlePendingDashboardAction(newValue)
+                pendingAction = nil
             }
-            #else
-            NavigationSplitView {
-                historySidebarContent
-                    .navigationTitle("")
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Menu {
-                                Section("Actions") {
-                                    Button {
-                                        openMetadataEditor()
-                                    } label: {
-                                        Label("Edit Notes & Tags", systemImage: "pencil.and.list.clipboard")
-                                    }
-                                    .disabled(selectedResult == nil)
-
-                                    Button {
-                                        presentHistoryImporter()
-                                    } label: {
-                                        Label("Import", systemImage: "square.and.arrow.down")
-                                    }
-
-                                    Button {
-                                        presentMultiDelete()
-                                    } label: {
-                                        Label("Multi-Delete", systemImage: "checklist")
-                                    }
-                                    .disabled(sortedScores.isEmpty)
-                                }
-
-                                Section {
-                                    Button(role: .destructive) {
-                                        presentDeleteAllConfirmation()
-                                    } label: {
-                                        Label("Delete All History", systemImage: "trash")
-                                    }
-                                    .disabled(sortedScores.isEmpty)
-                                }
-                            } label: {
-                                Label("More", systemImage: "ellipsis.circle")
-                            }
-                        }
-                    }
-            } detail: {
-                historyDetailContent
+            .onChange(of: pendingSelectedResultID) { _, newValue in
+                guard let newValue else { return }
+                openHistoryResult(withID: newValue)
+                pendingSelectedResultID = nil
             }
-            #endif
-        }
-        .searchable(text: $historySearchText, prompt: "Search devices, notes or tags")
-        .onChange(of: pendingAction) { _, newValue in
-            guard let newValue else { return }
-            handlePendingDashboardAction(newValue)
-            pendingAction = nil
-        }
-        .onChange(of: pendingSelectedResultID) { _, newValue in
-            guard let newValue else { return }
-            openHistoryResult(withID: newValue)
-            pendingSelectedResultID = nil
-        }
-        .fullScreenCover(item: $compactPresentedResult) { result in
-            #if targetEnvironment(macCatalyst)
-                EmptyView()
-                #else
+            .bencherItemCover(item: $compactPresentedResult) { result in
                 NavigationStack {
                     ScrollView {
                         DetailedResultView(result: result, comparisonBase: comparisonBase(for: result))
                             .padding(.top, 8)
                             .padding(.bottom, 24)
                     }
-                    .navigationBarTitleDisplayMode(.inline)
+                    .bencherInlineTitleDisplayMode()
                     .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
+                        ToolbarItem(placement: .bencherTopBarTrailing) {
                             Button("Done") {
                                 compactPresentedResult = nil
                             }
                         }
                     }
                 }
-            #endif
-        }
-        .sheet(item: $exportShareItem) { item in
-            ActivityView(activityItems: [item.url])
-        }
-        .sheet(isPresented: $isShowingMetadataEditor) {
-            MetadataEditorView(
-                note: $draftNote,
-                tagsText: $draftTagsText,
-                onSave: saveMetadata
-            )
-        }.sheet(isPresented: $isShowingMultiDeleteSheet) {
-            MultiDeleteHistoryView(scores: scores) { idsToDelete in
-                recentlyDeletedResults = scores.filter { idsToDelete.contains($0.id) }
-                scores.removeAll { idsToDelete.contains($0.id) }
-                BenchmarkStorage.save(scores)
+            }
+            .sheet(item: $exportShareItem) { item in
+                ActivityView(activityItems: [item.url])
+            }
+            .sheet(isPresented: $isShowingMetadataEditor) {
+                MetadataEditorView(
+                    note: $draftNote,
+                    tagsText: $draftTagsText,
+                    onSave: saveMetadata
+                )
+            }.sheet(isPresented: $isShowingMultiDeleteSheet) {
+                MultiDeleteHistoryView(scores: scores) { idsToDelete in
+                    recentlyDeletedResults = scores.filter { idsToDelete.contains($0.id) }
+                    scores.removeAll { idsToDelete.contains($0.id) }
+                    BenchmarkStorage.save(scores)
 
-                if let selectedResultID, idsToDelete.contains(selectedResultID) {
-                    self.selectedResultID = filteredSortedScores.first?.id
+                    if let selectedResultID, idsToDelete.contains(selectedResultID) {
+                        self.selectedResultID = filteredSortedScores.first?.id
+                    }
+
+                    isShowingMultiDeleteSheet = false
                 }
-
-                isShowingMultiDeleteSheet = false
             }
-        }
-        .fileExporter(
-            isPresented: $isShowingExporter,
-            document: exportDocument,
-            contentType: .json,
-            defaultFilename: "BencherHistory"
-        ) { result in
-            switch result {
-            case .success:
-                historyTransferMessage = "History exported successfully."
-                isShowingTransferAlert = true
-            case .failure(let error):
-                historyTransferMessage = "Export failed: \(error.localizedDescription)"
-                isShowingTransferAlert = true
-            }
-        }
-        .fileExporter(
-            isPresented: $isShowingCSVExporter,
-            document: exportCSVDocument,
-            contentType: .commaSeparatedText,
-            defaultFilename: "BencherHistory"
-        ) { result in
-            switch result {
-            case .success:
-                historyTransferMessage = "History exported successfully."
-                isShowingTransferAlert = true
-            case .failure(let error):
-                historyTransferMessage = "Export failed: \(error.localizedDescription)"
-                isShowingTransferAlert = true
-            }
-        }
-        .fileImporter(
-            isPresented: $isShowingImporter,
-            allowedContentTypes: [.json, .commaSeparatedText, .plainText],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else {
-                    historyTransferMessage = "Import failed: No file selected."
+            .fileExporter(
+                isPresented: $isShowingExporter,
+                document: exportDocument,
+                contentType: .json,
+                defaultFilename: "BencherHistory"
+            ) { result in
+                switch result {
+                case .success:
+                    historyTransferMessage = "History exported successfully."
                     isShowingTransferAlert = true
-                    return
-                }
-                importHistory(from: url)
-            case .failure(let error):
-                historyTransferMessage = "Import failed: \(error.localizedDescription)"
-                isShowingTransferAlert = true
-            }
-        }
-        .alert("History Transfer", isPresented: $isShowingTransferAlert, actions: {
-            Button("OK", role: .cancel) { }
-        }, message: {
-            Text(historyTransferMessage ?? "No message available.")
-        })
-        .alert("Delete All History", isPresented: $isShowingDeleteAllConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete All", role: .destructive) {
-                deleteAllHistory()
-            }
-        } message: {
-            Text("This will permanently remove all saved benchmark history.")
-        }
-        .confirmationDialog("Choose export range", isPresented: $isShowingExportOptions, titleVisibility: .visible) {
-            ForEach(availableExportCounts, id: \.self) { count in
-                let label = exportLabel(for: count)
-                Button(label) {
-                    prepareExport(limit: count)
+                case .failure(let error):
+                    historyTransferMessage = "Export failed: \(error.localizedDescription)"
+                    isShowingTransferAlert = true
                 }
             }
-        } message: {
-            Text("Select how many historic results to export.")
-        }
-        .sheet(isPresented: $isShowingCompareSheet, onDismiss: {
-            if horizontalSizeClass == .compact, shouldPresentPendingComparison, pendingComparisonResults.count == 2 {
-                let resultsToPresent = pendingComparisonResults
-                shouldPresentPendingComparison = false
-                pendingComparisonResults = []
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    compactComparisonSession = ComparisonSession(results: resultsToPresent)
+            .fileExporter(
+                isPresented: $isShowingCSVExporter,
+                document: exportCSVDocument,
+                contentType: .commaSeparatedText,
+                defaultFilename: "BencherHistory"
+            ) { result in
+                switch result {
+                case .success:
+                    historyTransferMessage = "History exported successfully."
+                    isShowingTransferAlert = true
+                case .failure(let error):
+                    historyTransferMessage = "Export failed: \(error.localizedDescription)"
+                    isShowingTransferAlert = true
                 }
             }
-        }) {
-            CompareSelectionView(
-                scores: sortedScores,
-                selectedIDs: $compareSelection,
-                onComplete: { results in
-                    if horizontalSizeClass == .compact {
-                        pendingComparisonResults = results
-                        shouldPresentPendingComparison = true
-                    } else {
-                        compareResults = results
-                        isShowingComparison = true
+            .fileImporter(
+                isPresented: $isShowingImporter,
+                allowedContentTypes: [.json, .commaSeparatedText, .plainText],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else {
+                        historyTransferMessage = "Import failed: No file selected."
+                        isShowingTransferAlert = true
+                        return
+                    }
+                    importHistory(from: url)
+                case .failure(let error):
+                    historyTransferMessage = "Import failed: \(error.localizedDescription)"
+                    isShowingTransferAlert = true
+                }
+            }
+            .alert("History Transfer", isPresented: $isShowingTransferAlert, actions: {
+                Button("OK", role: .cancel) { }
+            }, message: {
+                Text(historyTransferMessage ?? "No message available.")
+            })
+            .alert("Delete All History", isPresented: $isShowingDeleteAllConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete All", role: .destructive) {
+                    deleteAllHistory()
+                }
+            } message: {
+                Text("This will permanently remove all saved benchmark history.")
+            }
+            .confirmationDialog("Choose export range", isPresented: $isShowingExportOptions, titleVisibility: .visible) {
+                ForEach(availableExportCounts, id: \.self) { count in
+                    let label = exportLabel(for: count)
+                    Button(label) {
+                        prepareExport(limit: count)
                     }
                 }
-            )
-        }
-        .fullScreenCover(item: $compactComparisonSession) { session in
-            NavigationStack {
-                CompareResultsView(
-                    results: session.results,
-                    onClose: {
-                        compactComparisonSession = nil
-                        compareResults = []
-                        pendingComparisonResults = []
-                        shouldPresentPendingComparison = false
+            } message: {
+                Text("Select how many historic results to export.")
+            }
+            .sheet(isPresented: $isShowingCompareSheet, onDismiss: {
+                if horizontalSizeClass == .compact, shouldPresentPendingComparison, pendingComparisonResults.count == 2 {
+                    let resultsToPresent = pendingComparisonResults
+                    shouldPresentPendingComparison = false
+                    pendingComparisonResults = []
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        compactComparisonSession = ComparisonSession(results: resultsToPresent)
+                    }
+                }
+            }) {
+                CompareSelectionView(
+                    scores: sortedScores,
+                    selectedIDs: $compareSelection,
+                    onComplete: { results in
+                        if horizontalSizeClass == .compact {
+                            pendingComparisonResults = results
+                            shouldPresentPendingComparison = true
+                        } else {
+                            compareResults = results
+                            isShowingComparison = true
+                        }
                     }
                 )
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Done") {
+            }
+            .bencherItemCover(item: $compactComparisonSession) { session in
+                NavigationStack {
+                    CompareResultsView(
+                        results: session.results,
+                        onClose: {
                             compactComparisonSession = nil
                             compareResults = []
                             pendingComparisonResults = []
                             shouldPresentPendingComparison = false
                         }
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .bencherTopBarLeading) {
+                            Button("Done") {
+                                compactComparisonSession = nil
+                                compareResults = []
+                                pendingComparisonResults = []
+                                shouldPresentPendingComparison = false
+                            }
+                        }
                     }
                 }
             }
-        }
-        .onAppear {
-            if selectedResultID == nil {
-                selectedResultID = sortedScores.first?.id
+            .onAppear {
+                if selectedResultID == nil {
+                    selectedResultID = sortedScores.first?.id
+                }
             }
-        }
-        .onChange(of: scores) { _, newScores in
-            let newSorted = newScores.sorted(by: { $0.timestamp > $1.timestamp })
-            if let selectedResultID,
-               newSorted.contains(where: { $0.id == selectedResultID }) {
-                return
+            .onChange(of: scores) { _, newScores in
+                let newSorted = newScores.sorted(by: { $0.timestamp > $1.timestamp })
+                if let selectedResultID,
+                   newSorted.contains(where: { $0.id == selectedResultID }) {
+                    return
+                }
+                self.selectedResultID = newSorted.first?.id
             }
-            self.selectedResultID = newSorted.first?.id
+    }
+
+    @ViewBuilder
+    private var historyContainer: some View {
+        #if os(macOS)
+        HStack(spacing: 0) {
+            historySidebarContent
+                .frame(minWidth: 280, idealWidth: 300, maxWidth: 340)
+                .background(BencherPlatformColors.systemBackground)
+                .clipped()
+
+            Divider()
+
+            historyDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+        }
+        .toolbar {
+            historyActionsToolbar
+        }
+        #else
+        NavigationSplitView {
+            historySidebarContent
+                .navigationTitle("")
+                .toolbar {
+                    historyActionsToolbar
+                }
+        } detail: {
+            historyDetailContent
+        }
+        #endif
+    }
+
+    @ToolbarContentBuilder
+    private var historyActionsToolbar: some ToolbarContent {
+        ToolbarItem(placement: .bencherTopBarTrailing) {
+            Menu {
+                Section("Actions") {
+                    Button {
+                        openMetadataEditor()
+                    } label: {
+                        Label("Edit Notes & Tags", systemImage: "pencil.and.list.clipboard")
+                    }
+                    .disabled(selectedResult == nil)
+
+                    Button {
+                        presentHistoryImporter()
+                    } label: {
+                        Label("Import", systemImage: "square.and.arrow.down")
+                    }
+
+                    Button {
+                        presentMultiDelete()
+                    } label: {
+                        Label("Multi-Delete", systemImage: "checklist")
+                    }
+                    .disabled(sortedScores.isEmpty)
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        presentDeleteAllConfirmation()
+                    } label: {
+                        Label("Delete All History", systemImage: "trash")
+                    }
+                    .disabled(sortedScores.isEmpty)
+                }
+            } label: {
+                Label("More", systemImage: "ellipsis.circle")
+            }
         }
     }
 
@@ -1285,108 +1372,65 @@ struct HistoryView: View {
                 .pickerStyle(.segmented)
                 .controlSize(horizontalSizeClass == .compact ? .small : .regular)
 
-                ScrollViewReader { proxy in
-                    HStack(spacing: 8) {
-                        #if targetEnvironment(macCatalyst)
-                        Button {
-                            let newIndex = max(macHistoryFilterScrollIndex - 1, 0)
-                            macHistoryFilterScrollIndex = newIndex
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                proxy.scrollTo(newIndex, anchor: .leading)
-                            }
-                        } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.caption.weight(.bold))
-                                .frame(width: 28, height: 28)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(macHistoryFilterScrollIndex == 0)
-                        #endif
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: horizontalSizeClass == .compact ? 8 : 10) {
-                                Menu {
-                                    ForEach(historyDevices, id: \.self) { device in
-                                        Button {
-                                            selectedDeviceHistoryFilter = device
-                                        } label: {
-                                            historyMenuLabel(title: device, isSelected: selectedDeviceHistoryFilter == device)
-                                        }
-                                    }
-                                } label: {
-                                    filterChip(title: selectedDeviceHistoryFilter, systemImage: "iphone")
-                                }
-                                .id(0)
-
-                                Menu {
-                                    ForEach(historyBenchmarkIntensities, id: \.self) { intensity in
-                                        Button {
-                                            selectedBenchmarkHistoryFilter = intensity
-                                        } label: {
-                                            historyMenuLabel(title: intensity, isSelected: selectedBenchmarkHistoryFilter == intensity)
-                                        }
-                                    }
-                                } label: {
-                                    filterChip(title: selectedBenchmarkHistoryFilter, systemImage: "dial.medium")
-                                }
-                                .id(1)
-
-                                Menu {
-                                    ForEach(historyThermalFilters, id: \.self) { thermal in
-                                        Button {
-                                            selectedThermalHistoryFilter = thermal
-                                        } label: {
-                                            historyMenuLabel(title: thermal, isSelected: selectedThermalHistoryFilter == thermal)
-                                        }
-                                    }
-                                } label: {
-                                    filterChip(title: selectedThermalHistoryFilter, systemImage: "thermometer.medium")
-                                }
-                                .id(2)
-
-                                Menu {
-                                    ForEach(historyPowerFilters, id: \.self) { power in
-                                        Button {
-                                            selectedPowerHistoryFilter = power
-                                        } label: {
-                                            historyMenuLabel(title: power, isSelected: selectedPowerHistoryFilter == power)
-                                        }
-                                    }
-                                } label: {
-                                    filterChip(title: selectedPowerHistoryFilter, systemImage: "powerplug")
-                                }
-                                .id(3)
-
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: horizontalSizeClass == .compact ? 8 : 10) {
+                        Menu {
+                            ForEach(historyDevices, id: \.self) { device in
                                 Button {
-                                    favouritesOnly.toggle()
+                                    selectedDeviceHistoryFilter = device
                                 } label: {
-                                    filterChip(
-                                        title: favouritesOnly ? "Favourites" : "All Runs",
-                                        systemImage: favouritesOnly ? "star.fill" : "star"
-                                    )
+                                    historyMenuLabel(title: device, isSelected: selectedDeviceHistoryFilter == device)
                                 }
-                                .buttonStyle(.plain)
-                                .id(4)
-                            }
-                        }
-
-                        #if targetEnvironment(macCatalyst)
-                        Button {
-                            let newIndex = min(macHistoryFilterScrollIndex + 1, 4)
-                            macHistoryFilterScrollIndex = newIndex
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                proxy.scrollTo(newIndex, anchor: .trailing)
                             }
                         } label: {
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.bold))
-                                .frame(width: 28, height: 28)
+                            filterChip(title: selectedDeviceHistoryFilter, systemImage: "iphone")
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(macHistoryFilterScrollIndex == 4)
-                        #endif
+
+                        Menu {
+                            ForEach(historyBenchmarkIntensities, id: \.self) { intensity in
+                                Button {
+                                    selectedBenchmarkHistoryFilter = intensity
+                                } label: {
+                                    historyMenuLabel(title: intensity, isSelected: selectedBenchmarkHistoryFilter == intensity)
+                                }
+                            }
+                        } label: {
+                            filterChip(title: selectedBenchmarkHistoryFilter, systemImage: "dial.medium")
+                        }
+
+                        Menu {
+                            ForEach(historyThermalFilters, id: \.self) { thermal in
+                                Button {
+                                    selectedThermalHistoryFilter = thermal
+                                } label: {
+                                    historyMenuLabel(title: thermal, isSelected: selectedThermalHistoryFilter == thermal)
+                                }
+                            }
+                        } label: {
+                            filterChip(title: selectedThermalHistoryFilter, systemImage: "thermometer.medium")
+                        }
+
+                        Menu {
+                            ForEach(historyPowerFilters, id: \.self) { power in
+                                Button {
+                                    selectedPowerHistoryFilter = power
+                                } label: {
+                                    historyMenuLabel(title: power, isSelected: selectedPowerHistoryFilter == power)
+                                }
+                            }
+                        } label: {
+                            filterChip(title: selectedPowerHistoryFilter, systemImage: "powerplug")
+                        }
+
+                        Button {
+                            favouritesOnly.toggle()
+                        } label: {
+                            filterChip(
+                                title: favouritesOnly ? "Favourites" : "All Runs",
+                                systemImage: favouritesOnly ? "star.fill" : "star"
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
 
@@ -1531,8 +1575,8 @@ struct HistoryView: View {
     
     @ViewBuilder
     private func historyRowCard(for result: BenchmarkResult) -> some View {
-        let isSelected = horizontalSizeClass == .regular && selectedResultID == result.id
-        let isCompact = horizontalSizeClass == .compact
+        let isSelected = usesInlineHistoryDetail && selectedResultID == result.id
+        let isCompact = usesModalHistoryDetail
         let scoreText = String(format: "%.0f", result.overallScore)
         let dateText = result.timestamp.formatted(date: .abbreviated, time: .shortened)
         let ramText = "RAM raw: \(String(format: "%.0f", result.memoryRawThroughputMBps)) MB/s"
@@ -1659,15 +1703,7 @@ struct HistoryView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 18)
                 .stroke(
-                    isSelected ? Color.blue.opacity(0.35) : (
-                        {
-                            #if targetEnvironment(macCatalyst)
-                            return Color.white.opacity(0.16)
-                            #else
-                            return Color.primary.opacity(0.06)
-                            #endif
-                        }()
-                    ),
+                    isSelected ? Color.blue.opacity(0.35) : Color.primary.opacity(0.06),
                     lineWidth: isSelected ? 1.6 : 1
                 )
         )
@@ -1689,15 +1725,11 @@ struct HistoryView: View {
 
         card
             .onTapGesture {
-                #if targetEnvironment(macCatalyst)
+                if isCompact {
+                    compactPresentedResult = result
+                } else {
                     selectedResultID = result.id
-                    #else
-                    if isCompact {
-                        compactPresentedResult = result
-                    } else {
-                        selectedResultID = result.id
-                    }
-                #endif
+                }
             }
     }
     
@@ -1712,9 +1744,21 @@ struct HistoryView: View {
         guard let matched = scores.first(where: { $0.id == id }) else { return }
         selectedResultID = matched.id
 
-        if horizontalSizeClass == .compact {
+        if usesModalHistoryDetail {
             compactPresentedResult = matched
         }
+    }
+
+    private var usesInlineHistoryDetail: Bool {
+        #if os(macOS)
+        true
+        #else
+        horizontalSizeClass != .compact
+        #endif
+    }
+
+    private var usesModalHistoryDetail: Bool {
+        !usesInlineHistoryDetail
     }
     
     private func launchCompareFlow() {
@@ -2207,9 +2251,7 @@ struct DetailedResultView: View {
                 title: "Memory Score",
                 value: result.memoryScore,
                 description:
-                    Text("Measures memory handling throughput using large in-memory arrays and repeated transformation work. A higher score in this category indicates better OS/device memory handling and responsiveness for tasks that require a lot of memory, such as video editing, video rendering, ")
-                    + Text("Google Chrome").italic()
-                    + Text(" and some machine learning tasks. Raw throughput: \(String(format: "%.0f", result.memoryRawThroughputMBps)) MB/s."),
+                    Text(.init("Measures memory handling throughput using large in-memory arrays and repeated transformation work. A higher score in this category indicates better OS/device memory handling and responsiveness for tasks that require a lot of memory, such as video editing, video rendering, *Google Chrome* and some machine learning tasks. Raw throughput: \(String(format: "%.0f", result.memoryRawThroughputMBps)) MB/s.")),
                 deltaText: deltaText(current: result.memoryScore, previous: comparisonBase?.memoryScore)
             )
 
@@ -2319,18 +2361,12 @@ struct DetailedResultView: View {
         }
         .padding(
             .horizontal,
-            {
-                #if targetEnvironment(macCatalyst)
-                return 16.0
-                #else
-                return horizontalSizeClass == .compact ? 16.0 : 0.0
-                #endif
-            }()
+            horizontalSizeClass == .compact ? 16.0 : 0.0
         )
         .padding(.vertical)
         .navigationTitle("Result")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .bencherTopBarTrailing) {
                 ShareLink(item: shareSummaryText) {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
@@ -2852,7 +2888,7 @@ struct ScoreCard: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 15)
-                .fill(Color(.secondarySystemBackground))
+                .fill(BencherPlatformColors.secondaryBackground)
         )
         .padding(.horizontal)
         .scaleEffect(hasAnimatedIn ? 1.0 : 0.97)
@@ -3029,33 +3065,64 @@ class Benchmark {
 
     func measureGraphicsRendering() -> Double {
         let frameCount = graphicsFrameCount
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256))
-
         let start = CFAbsoluteTimeGetCurrent()
+        #if canImport(UIKit)
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256))
         for frame in 0..<frameCount {
             _ = renderer.image { context in
                 let cgContext = context.cgContext
-                let inset = CGFloat((frame % 20) + 1)
-
-                UIColor.systemBlue.setFill()
-                cgContext.fill(CGRect(x: 0, y: 0, width: 256, height: 256))
-
-                UIColor.systemPink.setStroke()
-                cgContext.setLineWidth(3)
-                cgContext.strokeEllipse(in: CGRect(x: inset, y: inset, width: 256 - (inset * 2), height: 256 - (inset * 2)))
-
-                UIColor.white.setFill()
-                cgContext.fill(CGRect(x: 40, y: 40, width: 176, height: 24))
-                cgContext.fill(CGRect(x: 40, y: 90, width: 120, height: 24))
-                cgContext.fill(CGRect(x: 40, y: 140, width: 200, height: 24))
+                drawGraphicsBenchmarkFrame(in: cgContext, frame: frame)
             }
         }
+        #elseif canImport(AppKit)
+        let imageSize = NSSize(width: 256, height: 256)
+        for frame in 0..<frameCount {
+            let image = NSImage(size: imageSize)
+            image.lockFocus()
+
+            let rect = NSRect(origin: .zero, size: imageSize)
+            NSColor.systemBlue.setFill()
+            rect.fill()
+
+            let inset = CGFloat((frame % 20) + 1)
+            let ellipseRect = NSRect(x: inset, y: inset, width: 256 - (inset * 2), height: 256 - (inset * 2))
+            let ellipse = NSBezierPath(ovalIn: ellipseRect)
+            ellipse.lineWidth = 3
+            NSColor.systemPink.setStroke()
+            ellipse.stroke()
+
+            NSColor.white.setFill()
+            NSRect(x: 40, y: 40, width: 176, height: 24).fill()
+            NSRect(x: 40, y: 90, width: 120, height: 24).fill()
+            NSRect(x: 40, y: 140, width: 200, height: 24).fill()
+
+            image.unlockFocus()
+        }
+        #endif
         let timeTaken = CFAbsoluteTimeGetCurrent() - start
         guard timeTaken > 0 else { return 0 }
 
         let framesPerSecondEquivalent = Double(frameCount) / timeTaken
         return framesPerSecondEquivalent * 5.0
     }
+
+    #if canImport(UIKit)
+    private func drawGraphicsBenchmarkFrame(in cgContext: CGContext, frame: Int) {
+        let inset = CGFloat((frame % 20) + 1)
+
+        UIColor.systemBlue.setFill()
+        cgContext.fill(CGRect(x: 0, y: 0, width: 256, height: 256))
+
+        UIColor.systemPink.setStroke()
+        cgContext.setLineWidth(3)
+        cgContext.strokeEllipse(in: CGRect(x: inset, y: inset, width: 256 - (inset * 2), height: 256 - (inset * 2)))
+
+        UIColor.white.setFill()
+        cgContext.fill(CGRect(x: 40, y: 40, width: 176, height: 24))
+        cgContext.fill(CGRect(x: 40, y: 90, width: 120, height: 24))
+        cgContext.fill(CGRect(x: 40, y: 140, width: 200, height: 24))
+    }
+    #endif
 
     func measureSingleCoreBenchmark() -> Double {
         let singleCoreIterations = max(cpuTaskIterations / 6, 60_000_000)
@@ -3198,7 +3265,40 @@ struct ExportShareItem: Identifiable {
     let url: URL
 }
 
-struct ActivityView: UIViewControllerRepresentable {
+struct ActivityView: View {
+    let activityItems: [Any]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        #if canImport(UIKit)
+        ActivityViewController(activityItems: activityItems)
+        #elseif canImport(AppKit)
+        VStack(spacing: 16) {
+            if let url = activityItems.first as? URL {
+                ShareLink(item: url) {
+                    Label("Share Export", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Text("This export item cannot be shared on this platform.")
+                    .foregroundColor(.secondary)
+            }
+
+            Button("Done") {
+                dismiss()
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(24)
+        .frame(minWidth: 320)
+        #else
+        EmptyView()
+        #endif
+    }
+}
+
+#if canImport(UIKit)
+private struct ActivityViewController: UIViewControllerRepresentable {
     let activityItems: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
@@ -3207,6 +3307,7 @@ struct ActivityView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
 }
+#endif
 
 // MARK: - Benchmark History JSON Document
 struct BenchmarkHistoryDocument: FileDocument {
@@ -3460,25 +3561,25 @@ enum BencherTheme {
 
 enum Haptics {
     static func success() {
-        #if !targetEnvironment(macCatalyst)
+        #if canImport(UIKit) && !targetEnvironment(macCatalyst)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif
     }
 
     static func warning() {
-        #if !targetEnvironment(macCatalyst)
+        #if canImport(UIKit) && !targetEnvironment(macCatalyst)
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
         #endif
     }
 
     static func error() {
-        #if !targetEnvironment(macCatalyst)
+        #if canImport(UIKit) && !targetEnvironment(macCatalyst)
         UINotificationFeedbackGenerator().notificationOccurred(.error)
         #endif
     }
 
     static func light() {
-        #if !targetEnvironment(macCatalyst)
+        #if canImport(UIKit) && !targetEnvironment(macCatalyst)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         #endif
     }
@@ -3533,7 +3634,7 @@ enum DeviceModel {
     }
 
     private static func currentIdentifier() -> String {
-        #if targetEnvironment(macCatalyst)
+        #if os(macOS) || targetEnvironment(macCatalyst)
         if let hwModel = sysctlString("hw.model"), !hwModel.isEmpty {
             return hwModel
         }
@@ -3712,10 +3813,12 @@ enum DeviceModel {
             return identifier
         }
 
-        #if targetEnvironment(macCatalyst)
+        #if os(macOS) || targetEnvironment(macCatalyst)
         return "Mac"
-        #else
+        #elseif canImport(UIKit)
         return UIDevice.current.model
+        #else
+        return "Device"
         #endif
     }
 }
@@ -3788,12 +3891,12 @@ struct CompareSelectionView: View {
             .navigationTitle("Compare Results")
             .searchable(text: $searchText, prompt: "Search devices, scores, dates or modes")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .bencherTopBarLeading) {
                     Button("Cancel") {
                         dismiss()
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .bencherTopBarTrailing) {
                     Button("Done") {
                         if selectedResults.count == 2 {
                             onComplete(selectedResults)
@@ -4021,7 +4124,7 @@ struct CompareResultsView: View {
             }
             .padding()
         }
-        .navigationBarTitleDisplayMode(.inline)
+        .bencherInlineTitleDisplayMode()
     }
 
     @ViewBuilder
@@ -4215,12 +4318,12 @@ struct MultiDeleteHistoryView: View {
             }
             .navigationTitle("Multi-Delete")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .bencherTopBarLeading) {
                     Button("Cancel") {
                         dismiss()
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .bencherTopBarTrailing) {
                     Button("Delete") {
                         onDelete(selectedIDs)
                         dismiss()
@@ -4926,6 +5029,7 @@ struct TrendsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20))
     }
     
+    //@available(iOS 16.0, *)
     private func selectOverallTrendResult(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
         guard let plotFrameAnchor = proxy.plotFrame else { return }
         let plotFrame = geometry[plotFrameAnchor]
@@ -4953,6 +5057,7 @@ struct TrendsView: View {
         }
     }
 
+    //@available(iOS 16.0, *)
     private func selectMetricTrendResult(
         at location: CGPoint,
         proxy: ChartProxy,
@@ -5109,55 +5214,177 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Benchmark Intensity") {
-                    Picker("Mode", selection: $intensity) {
-                        Text("Light").tag("Light")
-                        Text("Balanced").tag("Balanced")
-                        Text("Extreme").tag("Extreme")
-                    }
-                    .pickerStyle(.segmented)
-
-                    Text("Stored locally and used as your default benchmark intensity.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    Picker("Stability Runs", selection: $benchmarkRepeatCount) {
-                        Text("1 Run").tag(1)
-                        Text("3 Runs").tag(3)
-                        Text("5 Runs").tag(5)
-                    }
-
-                    Text("Use repeated runs to smooth out one-off fluctuations and create a more stable average result.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                Section("Appearance") {
-                    Picker("App Theme", selection: $appAppearanceMode) {
-                        Text("System").tag("System")
-                        Text("Light").tag("Light")
-                        Text("Dark").tag("Dark")
-                    }
-
-                    Text("Choose automatic system appearance or force light/dark mode.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                Section("Export Preferences") {
-                    Picker("Default Format", selection: $preferredExportFormat) {
-                        Text("JSON").tag("JSON")
-                        Text("CSV").tag("CSV")
-                    }
-
-                    Text("Settings are stored locally and will remain after restarting the app.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
+            settingsContent
             .navigationTitle("Settings")
         }
+    }
+
+    @ViewBuilder
+    private var settingsContent: some View {
+        #if os(macOS)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Preferences")
+                        .font(.largeTitle.bold())
+                    Text("Set your default benchmark behavior, appearance and export format.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                settingsSectionCard(
+                    title: "Benchmark Defaults",
+                    description: "These settings are applied automatically when you start a new run."
+                ) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Benchmark Mode")
+                                .font(.headline)
+                            Picker("Mode", selection: $intensity) {
+                                Text("Light").tag("Light")
+                                Text("Balanced").tag("Balanced")
+                                Text("Extreme").tag("Extreme")
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            Text("Stored locally and used as your default benchmark intensity.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Stability Runs")
+                                .font(.headline)
+                            Picker("Stability Runs", selection: $benchmarkRepeatCount) {
+                                Text("1 Run").tag(1)
+                                Text("3 Runs").tag(3)
+                                Text("5 Runs").tag(5)
+                            }
+                            .pickerStyle(.radioGroup)
+                            Text("Use repeated runs to smooth out one-off fluctuations and create a more stable average result.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                settingsSectionCard(
+                    title: "Appearance",
+                    description: "Choose whether Bencher follows the system appearance or uses a fixed theme."
+                ) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("App Theme", selection: $appAppearanceMode) {
+                            Text("System").tag("System")
+                            Text("Light").tag("Light")
+                            Text("Dark").tag("Dark")
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text("Choose automatic system appearance or force light or dark mode.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                settingsSectionCard(
+                    title: "Export Preferences",
+                    description: "Control which file format is preselected when exporting benchmark history."
+                ) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Default Format", selection: $preferredExportFormat) {
+                            Text("JSON").tag("JSON")
+                            Text("CSV").tag("CSV")
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text("Settings are stored locally and remain after restarting the app.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(BencherPlatformColors.systemBackground)
+        #else
+        Form {
+            Section("Benchmark Intensity") {
+                Picker("Mode", selection: $intensity) {
+                    Text("Light").tag("Light")
+                    Text("Balanced").tag("Balanced")
+                    Text("Extreme").tag("Extreme")
+                }
+                .pickerStyle(.segmented)
+
+                Text("Stored locally and used as your default benchmark intensity.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Picker("Stability Runs", selection: $benchmarkRepeatCount) {
+                    Text("1 Run").tag(1)
+                    Text("3 Runs").tag(3)
+                    Text("5 Runs").tag(5)
+                }
+
+                Text("Use repeated runs to smooth out one-off fluctuations and create a more stable average result.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section("Appearance") {
+                Picker("App Theme", selection: $appAppearanceMode) {
+                    Text("System").tag("System")
+                    Text("Light").tag("Light")
+                    Text("Dark").tag("Dark")
+                }
+
+                Text("Choose automatic system appearance or force light/dark mode.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section("Export Preferences") {
+                Picker("Default Format", selection: $preferredExportFormat) {
+                    Text("JSON").tag("JSON")
+                    Text("CSV").tag("CSV")
+                }
+
+                Text("Settings are stored locally and will remain after restarting the app.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private func settingsSectionCard<Content: View>(
+        title: String,
+        description: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            content()
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BencherTheme.cardGradient)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 }
 
@@ -5197,7 +5424,7 @@ struct BenchmarkRunReportView: View {
             }
             .navigationTitle("Run Report")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .bencherTopBarTrailing) {
                     Button("Done") {
                         dismiss()
                     }
@@ -5259,12 +5486,12 @@ struct MetadataEditorView: View {
             }
             .navigationTitle("Notes & Tags")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .bencherTopBarLeading) {
                     Button("Cancel") {
                         dismiss()
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .bencherTopBarTrailing) {
                     Button("Save") {
                         onSave()
                     }
@@ -5421,7 +5648,7 @@ struct ReferenceDevicesView: View {
                     .navigationTitle("Choose Result")
                     .searchable(text: $resultSearchText, prompt: "Search device, score, date or mode")
                     .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
+                        ToolbarItem(placement: .bencherTopBarLeading) {
                             Button {
                                 isShowingResultPicker = false
                             } label: {
@@ -5647,9 +5874,21 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.80",
+            title: "Mac to the Future",
+            releaseDate: "Current Build",
+            changes: [
+                "Added full MacOS support.",
+                "Changed the settings view for MacOS users to make it more inline for the platforms' design philosophy.",
+                "Added a new side menu bar in MacOS that is similar to the iPadOS version but with a more streamlined Mac design.",
+                "Updated the presentation of updates in the MacOS version to make it look cleaner.",
+                "Reversed changes on the history sidebar and detailed result view to make it look more like the iPadOS version again, implementing a new design system instead to make it workon MacOS.",
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.70",
             title: "Big Mac Energy",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Added MacOS Catalyst support.",
                 "Added automatic update feature on device names recently added to the reference list that weren't originally",
@@ -5659,9 +5898,18 @@ struct UpdatesView: View {
             ]
         ),
         AppUpdateEntry(
+            version: "V0.62",
+            title: "Sheen and Polish+",
+            releaseDate: "Older Build",
+            changes: [
+                "Added a proper cross-platform app icon.",
+                "Removed the older deprecated way of implementing an app icon.",
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.61",
             title: "Sheen and Polish",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Changed descriptions of functions to make them more consistent with the rest of the app.",
                 "Reworked descriptions to make them more user-friendly and less programmer-esque language.",
@@ -5670,7 +5918,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.60",
             title: "Reference and Compare Search Improvements",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Added searchable result selection to the Compare flow so large benchmark histories can be narrowed by device, score, date or mode.",
                 "Reworked the Reference tab result picker into a dedicated searchable chooser for better long-term scalability with many saved runs.",
@@ -6120,33 +6368,61 @@ struct UpdatesView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            updatesContent
+            .navigationTitle("Updates")
+        }
+    }
+
+    @ViewBuilder
+    private var updatesContent: some View {
+        #if os(macOS)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
                 if !currentBuildUpdates.isEmpty {
-                    Section("Current Build") {
-                        ForEach(currentBuildUpdates) { update in
-                            updateRow(update)
-                        }
-                    }
+                    updateSection("Current Build", entries: currentBuildUpdates)
                 }
 
                 if !previousBuildUpdates.isEmpty {
-                    Section("Previous Build") {
-                        ForEach(previousBuildUpdates) { update in
-                            updateRow(update)
-                        }
-                    }
+                    updateSection("Previous Build", entries: previousBuildUpdates)
                 }
 
                 if !olderBuildUpdates.isEmpty {
-                    Section("Older Builds") {
-                        ForEach(olderBuildUpdates) { update in
-                            updateRow(update)
-                        }
+                    updateSection("Older Builds", entries: olderBuildUpdates)
+                }
+            }
+            .frame(maxWidth: 860, alignment: .leading)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(BencherPlatformColors.systemBackground)
+        #else
+        List {
+            if !currentBuildUpdates.isEmpty {
+                Section("Current Build") {
+                    ForEach(currentBuildUpdates) { update in
+                        updateRow(update)
                     }
                 }
             }
-            .navigationTitle("Updates")
+
+            if !previousBuildUpdates.isEmpty {
+                Section("Previous Build") {
+                    ForEach(previousBuildUpdates) { update in
+                        updateRow(update)
+                    }
+                }
+            }
+
+            if !olderBuildUpdates.isEmpty {
+                Section("Older Builds") {
+                    ForEach(olderBuildUpdates) { update in
+                        updateRow(update)
+                    }
+                }
+            }
         }
+        #endif
     }
 
     @ViewBuilder
@@ -6179,6 +6455,26 @@ struct UpdatesView: View {
             }
         }
         .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func updateSection(_ title: String, entries: [AppUpdateEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+
+            ForEach(entries) { update in
+                updateRow(update)
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(BencherTheme.cardGradient)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+            }
+        }
     }
 }
 

@@ -13,5 +13,8 @@ struct BencherApp: App {
         WindowGroup {
             ContentView()
         }
+        #if os(macOS)
+        .defaultSize(width: 1400, height: 900)
+        #endif
     }
 }
