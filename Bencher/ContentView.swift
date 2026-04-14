@@ -5984,12 +5984,21 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
-            version: "V0.91",
-            title: "Cloudy Skies+",
+            version: "V0.92",
+            title: "Cloudy Skies with a Chance of Mac",
             releaseDate: "Current Build",
             changes: [
+                "Added App Sandbox Support to allow for test builds of Bencher for MacOS.",
+                "Changed project permission settings of Bencher.",
+            ]
+        ),
+        AppUpdateEntry(
+            version: "V0.91",
+            title: "Cloudy Skies+",
+            releaseDate: "Previous Build",
+            changes: [
                 "Changed program signing and capabilities.",
-                "Increases minimum iOS requirements to run Bencher.",
+                "Increases minimum iOS requirements to run Bencher (iOS 17).",
             ]
         ),
         AppUpdateEntry(
