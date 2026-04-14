@@ -5984,9 +5984,18 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.91",
+            title: "Cloudy Skies+",
+            releaseDate: "Current Build",
+            changes: [
+                "Changed program signing and capabilities.",
+                "Increases minimum iOS requirements to run Bencher.",
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.90",
             title: "Cloudy Skies",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Added iCloud support for storing benchmark results.",
                 "Made iCloud support toggleable in settings.",
