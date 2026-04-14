@@ -19,9 +19,11 @@ import AppKit
 struct ContentView: View {
     @State private var scores: [BenchmarkResult] = BenchmarkStorage.load()
     @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "System"
+    @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
     @State private var selectedTab: String = "dashboard"
     @State private var pendingHistoryAction: DashboardHistoryAction? = nil
     @State private var pendingHistorySelection: BenchmarkResult.ID? = nil
+    @State private var hasPreparedStorage: Bool = false
 
     var body: some View {
         #if os(macOS)
@@ -41,6 +43,19 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .preferredColorScheme(preferredColorScheme)
+        .onAppear {
+            guard !hasPreparedStorage else { return }
+            BenchmarkStorage.prepareForLaunch()
+            scores = BenchmarkStorage.load()
+            hasPreparedStorage = true
+        }
+        .onChange(of: iCloudHistorySyncEnabled) { _, isEnabled in
+            scores = BenchmarkStorage.setICloudSyncEnabled(isEnabled, currentScores: scores)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)) { _ in
+            guard iCloudHistorySyncEnabled else { return }
+            scores = BenchmarkStorage.load()
+        }
         #else
         TabView(selection: $selectedTab) {
             DashboardView(scores: scores, selectedTab: $selectedTab, pendingHistoryAction: $pendingHistoryAction)
@@ -86,6 +101,19 @@ struct ContentView: View {
                 .tag("updates")
         }
         .preferredColorScheme(preferredColorScheme)
+        .onAppear {
+            guard !hasPreparedStorage else { return }
+            BenchmarkStorage.prepareForLaunch()
+            scores = BenchmarkStorage.load()
+            hasPreparedStorage = true
+        }
+        .onChange(of: iCloudHistorySyncEnabled) { _, isEnabled in
+            scores = BenchmarkStorage.setICloudSyncEnabled(isEnabled, currentScores: scores)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)) { _ in
+            guard iCloudHistorySyncEnabled else { return }
+            scores = BenchmarkStorage.load()
+        }
         #endif
     }
 
@@ -3162,17 +3190,65 @@ class Benchmark {
 
 // MARK: - Benchmark Storage
 enum BenchmarkStorage {
-    private static let storageKey = "bencher.history.v1"
+    private static let localStorageKey = "bencher.history.v1"
+    private static let iCloudStorageKey = "bencher.history.icloud.v1"
+    private static let iCloudSyncEnabledKey = "icloudHistorySyncEnabled"
+
+    private enum Backend {
+        case local
+        case iCloud
+    }
 
     static func load() -> [BenchmarkResult] {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+        load(from: activeBackend)
+    }
+
+    static func save(_ scores: [BenchmarkResult]) {
+        save(scores, to: activeBackend)
+    }
+
+    static func prepareForLaunch() {
+        guard isICloudSyncEnabled else { return }
+        _ = NSUbiquitousKeyValueStore.default.synchronize()
+    }
+
+    static func setICloudSyncEnabled(_ isEnabled: Bool, currentScores: [BenchmarkResult]) -> [BenchmarkResult] {
+        let normalizedCurrent = deduplicate(currentScores)
+        UserDefaults.standard.set(isEnabled, forKey: iCloudSyncEnabledKey)
+
+        if isEnabled {
+            _ = NSUbiquitousKeyValueStore.default.synchronize()
+            let merged = mergeForImport(existing: load(from: .iCloud), imported: normalizedCurrent)
+            save(merged, to: .iCloud)
+            return merged
+        } else {
+            let merged = mergeForImport(existing: load(from: .local), imported: normalizedCurrent)
+            save(merged, to: .local)
+            return merged
+        }
+    }
+
+    static func mergeForImport(existing: [BenchmarkResult], imported: [BenchmarkResult]) -> [BenchmarkResult] {
+        deduplicate(existing + imported)
+    }
+
+    private static var isICloudSyncEnabled: Bool {
+        UserDefaults.standard.bool(forKey: iCloudSyncEnabledKey)
+    }
+
+    private static var activeBackend: Backend {
+        isICloudSyncEnabled ? .iCloud : .local
+    }
+
+    private static func load(from backend: Backend) -> [BenchmarkResult] {
+        guard let data = loadData(from: backend) else {
             return []
         }
 
         if let decoded = try? JSONDecoder().decode([BenchmarkResult].self, from: data) {
             let normalized = decoded.map { $0.normalizedDeviceNameIfNeeded() }
             if normalized.map(\.deviceName) != decoded.map(\.deviceName) {
-                save(normalized)
+                save(normalized, to: backend)
             }
             return normalized.sorted(by: { $0.timestamp > $1.timestamp })
         }
@@ -3229,7 +3305,7 @@ enum BenchmarkStorage {
             }
             let normalized = mapped.map { $0.normalizedDeviceNameIfNeeded() }
             if normalized.map(\.deviceName) != mapped.map(\.deviceName) {
-                save(normalized)
+                save(normalized, to: backend)
             }
             return normalized.sorted(by: { $0.timestamp > $1.timestamp })
         }
@@ -3237,14 +3313,16 @@ enum BenchmarkStorage {
         return []
     }
 
-    static func save(_ scores: [BenchmarkResult]) {
+    private static func save(_ scores: [BenchmarkResult], to backend: Backend) {
         let deduped = deduplicate(scores)
         guard let encoded = try? JSONEncoder().encode(deduped) else { return }
-        UserDefaults.standard.set(encoded, forKey: storageKey)
-    }
-
-    static func mergeForImport(existing: [BenchmarkResult], imported: [BenchmarkResult]) -> [BenchmarkResult] {
-        deduplicate(existing + imported)
+        switch backend {
+        case .local:
+            UserDefaults.standard.set(encoded, forKey: localStorageKey)
+        case .iCloud:
+            NSUbiquitousKeyValueStore.default.set(encoded, forKey: iCloudStorageKey)
+            _ = NSUbiquitousKeyValueStore.default.synchronize()
+        }
     }
 
     private static func deduplicate(_ scores: [BenchmarkResult]) -> [BenchmarkResult] {
@@ -3257,6 +3335,15 @@ enum BenchmarkStorage {
             }
         }
         return merged.values.sorted(by: { $0.timestamp > $1.timestamp })
+    }
+
+    private static func loadData(from backend: Backend) -> Data? {
+        switch backend {
+        case .local:
+            return UserDefaults.standard.data(forKey: localStorageKey)
+        case .iCloud:
+            return NSUbiquitousKeyValueStore.default.data(forKey: iCloudStorageKey)
+        }
     }
 }
 
@@ -5211,6 +5298,7 @@ struct SettingsView: View {
     @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 1
     @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "System"
     @AppStorage("preferredExportFormat") private var preferredExportFormat: String = "JSON"
+    @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -5302,6 +5390,20 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+
+                settingsSectionCard(
+                    title: "Storage & Sync",
+                    description: "Choose whether benchmark history stays only on this device or syncs through your iCloud account."
+                ) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Sync benchmark history with iCloud", isOn: $iCloudHistorySyncEnabled)
+                            .toggleStyle(.switch)
+
+                        Text("When enabled, Bencher merges your local history into iCloud and keeps future benchmark history synced across your devices signed into the same Apple ID.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             .frame(maxWidth: 760, alignment: .leading)
             .padding(.horizontal, 28)
@@ -5353,6 +5455,14 @@ struct SettingsView: View {
                 }
 
                 Text("Settings are stored locally and will remain after restarting the app.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section("Storage & Sync") {
+                Toggle("Sync benchmark history with iCloud", isOn: $iCloudHistorySyncEnabled)
+
+                Text("When enabled, Bencher merges your local history into iCloud and keeps future benchmark history synced across your devices signed into the same Apple ID.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -5874,9 +5984,18 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.90",
+            title: "Cloudy Skies",
+            releaseDate: "Current Build",
+            changes: [
+                "Added iCloud support for storing benchmark results.",
+                "Made iCloud support toggleable in settings.",
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.80",
             title: "Mac to the Future",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Added full MacOS support.",
                 "Changed the settings view for MacOS users to make it more inline for the platforms' design philosophy.",
@@ -5888,7 +6007,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.70",
             title: "Big Mac Energy",
-            releaseDate: "Previous Build",
+            releaseDate: "Older Build",
             changes: [
                 "Added MacOS Catalyst support.",
                 "Added automatic update feature on device names recently added to the reference list that weren't originally",
