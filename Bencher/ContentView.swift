@@ -2986,16 +2986,7 @@ class Benchmark {
         DispatchQueue.concurrentPerform(iterations: coreCount) { coreIndex in
             let startIndex = coreIndex * iterationsPerCore + 1
             let endIndex = startIndex + iterationsPerCore
-            var localSum = 0.0
-
-            for i in startIndex..<endIndex {
-                let value = Double(i)
-                localSum += sin(value) * cos(value * 0.5)
-                    + sin(value * 0.125) * 0.5
-                    + sqrt(value)
-            }
-
-            totals[coreIndex] = localSum
+            totals[coreIndex] = cpuKernelSlice(startIndex: startIndex, endIndex: endIndex)
         }
 
         BenchmarkBlackHole.consume(totals.reduce(0, +))
@@ -3125,26 +3116,7 @@ class Benchmark {
         #elseif canImport(AppKit)
         let imageSize = NSSize(width: 256, height: 256)
         for frame in 0..<frameCount {
-            let image = NSImage(size: imageSize)
-            image.lockFocus()
-
-            let rect = NSRect(origin: .zero, size: imageSize)
-            NSColor.systemBlue.setFill()
-            rect.fill()
-
-            let inset = CGFloat((frame % 20) + 1)
-            let ellipseRect = NSRect(x: inset, y: inset, width: 256 - (inset * 2), height: 256 - (inset * 2))
-            let ellipse = NSBezierPath(ovalIn: ellipseRect)
-            ellipse.lineWidth = 3
-            NSColor.systemPink.setStroke()
-            ellipse.stroke()
-
-            NSColor.white.setFill()
-            NSRect(x: 40, y: 40, width: 176, height: 24).fill()
-            NSRect(x: 40, y: 90, width: 120, height: 24).fill()
-            NSRect(x: 40, y: 140, width: 200, height: 24).fill()
-
-            image.unlockFocus()
+            renderAppKitGraphicsFrame(size: imageSize, frame: frame)
         }
         #endif
         let timeTaken = CFAbsoluteTimeGetCurrent() - start
@@ -3155,6 +3127,7 @@ class Benchmark {
     }
 
     #if canImport(UIKit)
+    @_optimize(none)
     private func drawGraphicsBenchmarkFrame(in cgContext: CGContext, frame: Int) {
         let inset = CGFloat((frame % 20) + 1)
 
@@ -3169,6 +3142,46 @@ class Benchmark {
         cgContext.fill(CGRect(x: 40, y: 40, width: 176, height: 24))
         cgContext.fill(CGRect(x: 40, y: 90, width: 120, height: 24))
         cgContext.fill(CGRect(x: 40, y: 140, width: 200, height: 24))
+    }
+    #endif
+
+    @_optimize(none)
+    private func cpuKernelSlice(startIndex: Int, endIndex: Int) -> Double {
+        var localSum = 0.0
+
+        for i in startIndex..<endIndex {
+            let value = Double(i)
+            localSum += sin(value) * cos(value * 0.5)
+                + sin(value * 0.125) * 0.5
+                + sqrt(value)
+        }
+
+        return localSum
+    }
+
+    #if canImport(AppKit)
+    @_optimize(none)
+    private func renderAppKitGraphicsFrame(size: NSSize, frame: Int) {
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        let rect = NSRect(origin: .zero, size: size)
+        NSColor.systemBlue.setFill()
+        rect.fill()
+
+        let inset = CGFloat((frame % 20) + 1)
+        let ellipseRect = NSRect(x: inset, y: inset, width: size.width - (inset * 2), height: size.height - (inset * 2))
+        let ellipse = NSBezierPath(ovalIn: ellipseRect)
+        ellipse.lineWidth = 3
+        NSColor.systemPink.setStroke()
+        ellipse.stroke()
+
+        NSColor.white.setFill()
+        NSRect(x: 40, y: 40, width: 176, height: 24).fill()
+        NSRect(x: 40, y: 90, width: 120, height: 24).fill()
+        NSRect(x: 40, y: 140, width: 200, height: 24).fill()
+
+        image.unlockFocus()
     }
     #endif
 
@@ -6007,6 +6020,36 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.95",
+            title: "Smoother Results",
+            releaseDate: "Current Build",
+            changes: [
+                "Improved benchmark consistency so results feel far less jumpy between different ways of installing and launching the app.",
+                "Tidied up a few rough edges in the benchmark flow to make fresh installs behave more predictably.",
+                "Kept polishing the Mac version so it feels a little more settled overall."
+            ]
+        ),
+        AppUpdateEntry(
+            version: "V0.94",
+            title: "Mac Polish Pass",
+            releaseDate: "Previous Build",
+            changes: [
+                "Refined the Mac layout so the app feels more at home on a desktop window.",
+                "Adjusted spacing and sizing in a few places to stop panels from feeling oversized or cramped.",
+                "Made the settings and updates screens a bit easier on the eyes, especially on larger displays."
+            ]
+        ),
+        AppUpdateEntry(
+            version: "V0.93",
+            title: "History, But Tidier",
+            releaseDate: "Previous Build",
+            changes: [
+                "Reworked the Mac history view so it behaves more naturally when resizing the window.",
+                "Smoothed out the sidebar and detail layout to avoid awkward jumps while browsing old benchmark runs.",
+                "Made the overall Mac navigation feel closer to a proper desktop app instead of a straight tablet carry-over."
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.92",
             title: "Cloudy Skies with a Chance of Mac",
             releaseDate: "Current Build",
@@ -6021,7 +6064,7 @@ struct UpdatesView: View {
             releaseDate: "Previous Build",
             changes: [
                 "Changed program signing and capabilities.",
-                "Increases minimum iOS requirements to run Bencher (iOS 17).",
+                "Increased minimum iOS requirements to run Bencher (iOS 17).",
             ]
         ),
         AppUpdateEntry(
