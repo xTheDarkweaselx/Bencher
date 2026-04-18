@@ -2970,6 +2970,7 @@ class Benchmark {
             }
         }
 
+    @_optimize(none)
     func measureCPUBenchmark() -> Double {
         let coreCount = max(ProcessInfo.processInfo.activeProcessorCount, 2)
         let iterationsPerCore = max(cpuTaskIterations / coreCount, 25_000_000)
@@ -3008,6 +3009,7 @@ class Benchmark {
         return rawScore / normalizationFactor
     }
 
+    @_optimize(none)
     func measureMemoryBenchmark() -> (score: Double, throughputMBps: Double) {
         let elementCount = min(largeArraySize / 8, 12_000_000)
         var buffer = Array(repeating: Double.zero, count: elementCount)
@@ -3042,6 +3044,7 @@ class Benchmark {
         return (rawScore, throughputMBps)
     }
 
+    @_optimize(none)
     func measureSSDSpeed() -> (score: Double, combinedMBps: Double, readMBps: Double, writeMBps: Double) {
         let fileSize = ssdFileSize
         let chunkSize = ssdChunkSize
@@ -3107,6 +3110,7 @@ class Benchmark {
         }
     }
 
+    @_optimize(none)
     func measureGraphicsRendering() -> Double {
         let frameCount = graphicsFrameCount
         let start = CFAbsoluteTimeGetCurrent()
@@ -3168,6 +3172,7 @@ class Benchmark {
     }
     #endif
 
+    @_optimize(none)
     func measureSingleCoreBenchmark() -> Double {
         let singleCoreIterations = max(cpuTaskIterations / 6, 60_000_000)
         let start = CFAbsoluteTimeGetCurrent()
