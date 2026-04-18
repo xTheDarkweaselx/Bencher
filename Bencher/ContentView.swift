@@ -2929,6 +2929,15 @@ struct ScoreCard: View {
 }
 
 // MARK: - Benchmark Functions
+private enum BenchmarkBlackHole {
+    private static var sink: Double = 0
+
+    @inline(never)
+    static func consume(_ value: Double) {
+        sink += value.isFinite ? value : 0.000_001
+    }
+}
+
 class Benchmark {
     private let cpuTaskIterations: Int
         private let largeArraySize: Int
@@ -2980,13 +2989,15 @@ class Benchmark {
 
             for i in startIndex..<endIndex {
                 let value = Double(i)
-                localSum += sin(value) * cos(value)
-                    + tan(value).truncatingRemainder(dividingBy: 1.0)
+                localSum += sin(value) * cos(value * 0.5)
+                    + sin(value * 0.125) * 0.5
                     + sqrt(value)
             }
 
             totals[coreIndex] = localSum
         }
+
+        BenchmarkBlackHole.consume(totals.reduce(0, +))
 
         let timeTaken = CFAbsoluteTimeGetCurrent() - start
         guard timeTaken > 0 else { return 0 }
@@ -3015,6 +3026,11 @@ class Benchmark {
                 buffer[index] += buffer[index - 1] * 0.0001
             }
         }
+
+        let checksum = stride(from: 0, to: buffer.count, by: 97).reduce(0.0) { partial, index in
+            partial + buffer[index]
+        }
+        BenchmarkBlackHole.consume(checksum)
 
         let timeTaken = CFAbsoluteTimeGetCurrent() - start
         guard timeTaken > 0 else { return (0, 0) }
@@ -3159,11 +3175,13 @@ class Benchmark {
 
         for i in 1...singleCoreIterations {
             let value = Double(i)
-            sum += sin(value) * cos(value)
-                + tan(value).truncatingRemainder(dividingBy: 1.0)
+            sum += sin(value) * cos(value * 0.5)
+                + sin(value * 0.125) * 0.5
                 + log(value + 1.0)
                 + sqrt(value) * 0.001
         }
+
+        BenchmarkBlackHole.consume(sum)
 
         let timeTaken = CFAbsoluteTimeGetCurrent() - start
         guard timeTaken > 0 else { return 0 }
