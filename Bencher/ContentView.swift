@@ -8,6 +8,12 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Charts
+#if canImport(Metal)
+import Metal
+#endif
+#if os(macOS)
+import OpenCL
+#endif
 
 #if canImport(UIKit)
 import UIKit
@@ -242,6 +248,7 @@ struct BenchmarkView: View {
     @Binding var scores: [BenchmarkResult]
     @AppStorage("benchmarkIntensity") private var benchmarkIntensity: String = "Balanced"
     @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 1
+    @AppStorage("graphicsBenchmarkBackend") private var graphicsBenchmarkBackend: String = GraphicsBenchmarkBackend.metal.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var singleCoreScore: Double? = nil
@@ -621,7 +628,7 @@ struct BenchmarkView: View {
 
         var workItem: DispatchWorkItem!
         workItem = DispatchWorkItem {
-            let benchmark = Benchmark(intensity: benchmarkIntensity)
+            let benchmark = Benchmark(intensity: benchmarkIntensity, graphicsBackend: graphicsBenchmarkBackend)
             
             // Single-Core Benchmark
             DispatchQueue.main.async {
@@ -788,6 +795,7 @@ struct BenchmarkView: View {
                         ssdRawCombinedMBps: ssdResult.combinedMBps.rounded(),
                         ssdRawReadMBps: ssdResult.readMBps.rounded(),
                         ssdRawWriteMBps: ssdResult.writeMBps.rounded(),
+                        graphicsBackend: benchmark.lastGraphicsBackendUsed.rawValue,
                         graphicsScore: calibratedGraphics,
                         overallScore: overall,
                         timestamp: Date(),
@@ -1004,6 +1012,7 @@ struct HistoryView: View {
     @State private var selectedThermalHistoryFilter: String = "All Thermal States"
     @State private var selectedPowerHistoryFilter: String = "All Power States"
     @State private var favouritesOnly: Bool = false
+    @State private var historyFilterScrollIndex: Int = 0
     @State private var isShowingDeleteAllConfirmation: Bool = false
     @State private var isShowingMultiDeleteSheet: Bool = false
     @State private var recentlyDeletedResults: [BenchmarkResult] = []
@@ -1400,67 +1409,7 @@ struct HistoryView: View {
                 .pickerStyle(.segmented)
                 .controlSize(horizontalSizeClass == .compact ? .small : .regular)
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: horizontalSizeClass == .compact ? 8 : 10) {
-                        Menu {
-                            ForEach(historyDevices, id: \.self) { device in
-                                Button {
-                                    selectedDeviceHistoryFilter = device
-                                } label: {
-                                    historyMenuLabel(title: device, isSelected: selectedDeviceHistoryFilter == device)
-                                }
-                            }
-                        } label: {
-                            filterChip(title: selectedDeviceHistoryFilter, systemImage: "iphone")
-                        }
-
-                        Menu {
-                            ForEach(historyBenchmarkIntensities, id: \.self) { intensity in
-                                Button {
-                                    selectedBenchmarkHistoryFilter = intensity
-                                } label: {
-                                    historyMenuLabel(title: intensity, isSelected: selectedBenchmarkHistoryFilter == intensity)
-                                }
-                            }
-                        } label: {
-                            filterChip(title: selectedBenchmarkHistoryFilter, systemImage: "dial.medium")
-                        }
-
-                        Menu {
-                            ForEach(historyThermalFilters, id: \.self) { thermal in
-                                Button {
-                                    selectedThermalHistoryFilter = thermal
-                                } label: {
-                                    historyMenuLabel(title: thermal, isSelected: selectedThermalHistoryFilter == thermal)
-                                }
-                            }
-                        } label: {
-                            filterChip(title: selectedThermalHistoryFilter, systemImage: "thermometer.medium")
-                        }
-
-                        Menu {
-                            ForEach(historyPowerFilters, id: \.self) { power in
-                                Button {
-                                    selectedPowerHistoryFilter = power
-                                } label: {
-                                    historyMenuLabel(title: power, isSelected: selectedPowerHistoryFilter == power)
-                                }
-                            }
-                        } label: {
-                            filterChip(title: selectedPowerHistoryFilter, systemImage: "powerplug")
-                        }
-
-                        Button {
-                            favouritesOnly.toggle()
-                        } label: {
-                            filterChip(
-                                title: favouritesOnly ? "Favourites" : "All Runs",
-                                systemImage: favouritesOnly ? "star.fill" : "star"
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                historySecondaryFiltersRow
 
                 if !recentlyDeletedResults.isEmpty {
                     HStack(spacing: 12) {
@@ -1600,6 +1549,128 @@ struct HistoryView: View {
             .padding()
         }
     }
+
+    @ViewBuilder
+    private var historySecondaryFiltersRow: some View {
+        #if os(macOS)
+        ScrollViewReader { proxy in
+            HStack(spacing: 8) {
+                historyFilterScrollButton(systemImage: "chevron.left", isEnabled: historyFilterScrollIndex > 0) {
+                    scrollHistoryFilters(by: -1, proxy: proxy)
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    historySecondaryFilterChips
+                }
+
+                historyFilterScrollButton(
+                    systemImage: "chevron.right",
+                    isEnabled: historyFilterScrollIndex < historyFilterChipIDs.count - 1
+                ) {
+                    scrollHistoryFilters(by: 1, proxy: proxy)
+                }
+            }
+        }
+        #else
+        ScrollView(.horizontal, showsIndicators: false) {
+            historySecondaryFilterChips
+        }
+        #endif
+    }
+
+    private var historySecondaryFilterChips: some View {
+        HStack(spacing: horizontalSizeClass == .compact ? 8 : 10) {
+            Menu {
+                ForEach(historyDevices, id: \.self) { device in
+                    Button {
+                        selectedDeviceHistoryFilter = device
+                    } label: {
+                        historyMenuLabel(title: device, isSelected: selectedDeviceHistoryFilter == device)
+                    }
+                }
+            } label: {
+                filterChip(title: selectedDeviceHistoryFilter, systemImage: "iphone")
+            }
+            .id(HistoryFilterChipID.device)
+
+            Menu {
+                ForEach(historyBenchmarkIntensities, id: \.self) { intensity in
+                    Button {
+                        selectedBenchmarkHistoryFilter = intensity
+                    } label: {
+                        historyMenuLabel(title: intensity, isSelected: selectedBenchmarkHistoryFilter == intensity)
+                    }
+                }
+            } label: {
+                filterChip(title: selectedBenchmarkHistoryFilter, systemImage: "dial.medium")
+            }
+            .id(HistoryFilterChipID.intensity)
+
+            Menu {
+                ForEach(historyThermalFilters, id: \.self) { thermal in
+                    Button {
+                        selectedThermalHistoryFilter = thermal
+                    } label: {
+                        historyMenuLabel(title: thermal, isSelected: selectedThermalHistoryFilter == thermal)
+                    }
+                }
+            } label: {
+                filterChip(title: selectedThermalHistoryFilter, systemImage: "thermometer.medium")
+            }
+            .id(HistoryFilterChipID.thermal)
+
+            Menu {
+                ForEach(historyPowerFilters, id: \.self) { power in
+                    Button {
+                        selectedPowerHistoryFilter = power
+                    } label: {
+                        historyMenuLabel(title: power, isSelected: selectedPowerHistoryFilter == power)
+                    }
+                }
+            } label: {
+                filterChip(title: selectedPowerHistoryFilter, systemImage: "powerplug")
+            }
+            .id(HistoryFilterChipID.power)
+
+            Button {
+                favouritesOnly.toggle()
+            } label: {
+                filterChip(
+                    title: favouritesOnly ? "Favourites" : "All Runs",
+                    systemImage: favouritesOnly ? "star.fill" : "star"
+                )
+            }
+            .buttonStyle(.plain)
+            .id(HistoryFilterChipID.favourites)
+        }
+    }
+
+    private var historyFilterChipIDs: [HistoryFilterChipID] {
+        HistoryFilterChipID.allCases
+    }
+
+    private func scrollHistoryFilters(by offset: Int, proxy: ScrollViewProxy) {
+        let newIndex = min(max(historyFilterScrollIndex + offset, 0), historyFilterChipIDs.count - 1)
+        guard newIndex != historyFilterScrollIndex else { return }
+
+        historyFilterScrollIndex = newIndex
+        withAnimation(.easeInOut(duration: 0.2)) {
+            proxy.scrollTo(historyFilterChipIDs[newIndex], anchor: .center)
+        }
+    }
+
+    @ViewBuilder
+    private func historyFilterScrollButton(systemImage: String, isEnabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.semibold))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(isEnabled ? .secondary : .gray)
+        .opacity(isEnabled ? 1.0 : 0.45)
+        .disabled(!isEnabled)
+    }
     
     @ViewBuilder
     private func historyRowCard(for result: BenchmarkResult) -> some View {
@@ -1643,6 +1714,12 @@ struct HistoryView: View {
                         title: result.benchmarkIntensity,
                         systemImage: "dial.medium",
                         tint: .blue
+                    )
+
+                    historyStatusChip(
+                        title: result.graphicsBackend,
+                        systemImage: "display",
+                        tint: .pink
                     )
                 }
             }
@@ -1854,6 +1931,7 @@ struct HistoryView: View {
             ssdRawCombinedMBps: existing.ssdRawCombinedMBps,
             ssdRawReadMBps: existing.ssdRawReadMBps,
             ssdRawWriteMBps: existing.ssdRawWriteMBps,
+            graphicsBackend: existing.graphicsBackend,
             graphicsScore: existing.graphicsScore,
             overallScore: existing.overallScore,
             timestamp: existing.timestamp,
@@ -1948,6 +2026,7 @@ struct HistoryView: View {
             ssdRawCombinedMBps: existing.ssdRawCombinedMBps,
             ssdRawReadMBps: existing.ssdRawReadMBps,
             ssdRawWriteMBps: existing.ssdRawWriteMBps,
+            graphicsBackend: existing.graphicsBackend,
             graphicsScore: existing.graphicsScore,
             overallScore: existing.overallScore,
             timestamp: existing.timestamp,
@@ -2198,6 +2277,7 @@ struct DetailedResultView: View {
                         }
 
                         detailStatusChip(title: result.benchmarkIntensity, systemImage: "dial.medium", tint: .blue)
+                        detailStatusChip(title: result.graphicsBackend, systemImage: "display", tint: .pink)
 
                         detailStatusChip(
                             title: thermalStateText(result.thermalState),
@@ -2409,6 +2489,7 @@ struct DetailedResultView: View {
         Overall Score: \(String(format: "%.0f", result.overallScore))
         Tier: \(result.performanceTier)
         Benchmark Type: \(result.benchmarkIntensity)
+        Graphics Backend: \(result.graphicsBackend)
         Single-Core: \(String(format: "%.0f", result.singleCoreScore))
         Multi-Core: \(String(format: "%.0f", result.cpuScore))
         Memory: \(String(format: "%.0f", result.memoryScore))
@@ -2671,6 +2752,7 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         case ssdRawCombinedMBps
         case ssdRawReadMBps
         case ssdRawWriteMBps
+        case graphicsBackend
         case graphicsScore
         case overallScore
         case timestamp
@@ -2701,6 +2783,7 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
             ssdRawCombinedMBps: ssdRawCombinedMBps,
             ssdRawReadMBps: ssdRawReadMBps,
             ssdRawWriteMBps: ssdRawWriteMBps,
+            graphicsBackend: graphicsBackend,
             graphicsScore: graphicsScore,
             overallScore: overallScore,
             timestamp: timestamp,
@@ -2725,6 +2808,7 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         ssdRawCombinedMBps: Double,
         ssdRawReadMBps: Double,
         ssdRawWriteMBps: Double,
+        graphicsBackend: String = GraphicsBenchmarkBackend.legacy.rawValue,
         graphicsScore: Double,
         overallScore: Double,
         timestamp: Date,
@@ -2746,6 +2830,7 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         self.ssdRawCombinedMBps = ssdRawCombinedMBps
         self.ssdRawReadMBps = ssdRawReadMBps
         self.ssdRawWriteMBps = ssdRawWriteMBps
+        self.graphicsBackend = graphicsBackend
         self.graphicsScore = graphicsScore
         self.overallScore = overallScore
         self.timestamp = timestamp
@@ -2771,6 +2856,7 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         ssdRawCombinedMBps = try container.decodeIfPresent(Double.self, forKey: .ssdRawCombinedMBps) ?? ssdScore
         ssdRawReadMBps = try container.decodeIfPresent(Double.self, forKey: .ssdRawReadMBps) ?? ssdRawCombinedMBps
         ssdRawWriteMBps = try container.decodeIfPresent(Double.self, forKey: .ssdRawWriteMBps) ?? ssdRawCombinedMBps
+        graphicsBackend = try container.decodeIfPresent(String.self, forKey: .graphicsBackend) ?? GraphicsBenchmarkBackend.legacy.rawValue
         graphicsScore = try container.decodeIfPresent(Double.self, forKey: .graphicsScore) ?? 0
         overallScore = try container.decodeIfPresent(Double.self, forKey: .overallScore) ?? 0
         timestamp = try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
@@ -2786,6 +2872,7 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
     let ssdRawCombinedMBps: Double
     let ssdRawReadMBps: Double
     let ssdRawWriteMBps: Double
+    let graphicsBackend: String
     let graphicsScore: Double
     let overallScore: Double
     let timestamp: Date
@@ -2938,6 +3025,30 @@ private enum BenchmarkBlackHole {
     }
 }
 
+enum GraphicsBenchmarkBackend: String, Identifiable, Codable {
+    case metal = "Metal"
+    case openCL = "OpenCL"
+    case legacy = "Legacy Renderer"
+
+    var id: String { rawValue }
+
+    static var settingsOptions: [GraphicsBenchmarkBackend] {
+        #if os(macOS)
+        [.metal, .openCL]
+        #else
+        [.metal, .legacy]
+        #endif
+    }
+
+    static var settingsHelpText: String {
+        #if os(macOS)
+        "Metal is the recommended option. OpenCL is available as a Mac-only fallback, and only Metal graphics runs are shown in Trends."
+        #else
+        "Metal is the recommended option. Legacy Renderer is available for comparison, but only Metal graphics runs are shown in Trends."
+        #endif
+    }
+}
+
 class Benchmark {
     private let cpuTaskIterations: Int
         private let largeArraySize: Int
@@ -2946,8 +3057,17 @@ class Benchmark {
         private let ssdFileSize: Int
         private let ssdChunkSize: Int
         private let graphicsFrameCount: Int
+        private let preferredGraphicsBackend: GraphicsBenchmarkBackend
+        private(set) var lastGraphicsBackendUsed: GraphicsBenchmarkBackend
 
-        init(intensity: String = "Balanced") {
+        init(intensity: String = "Balanced", graphicsBackend: String = GraphicsBenchmarkBackend.metal.rawValue) {
+            let requestedBackend = GraphicsBenchmarkBackend(rawValue: graphicsBackend) ?? .metal
+            #if os(macOS)
+            preferredGraphicsBackend = requestedBackend == .legacy ? .openCL : requestedBackend
+            #else
+            preferredGraphicsBackend = requestedBackend == .openCL ? .legacy : requestedBackend
+            #endif
+            lastGraphicsBackendUsed = preferredGraphicsBackend
             switch intensity {
             case "Light":
                 cpuTaskIterations = 220_000_000
@@ -3103,6 +3223,26 @@ class Benchmark {
 
     @_optimize(none)
     func measureGraphicsRendering() -> Double {
+        if preferredGraphicsBackend == .metal {
+            #if canImport(Metal)
+            if let metalScore = measureMetalGraphicsRendering() {
+                lastGraphicsBackendUsed = .metal
+                return metalScore
+            }
+            #endif
+        }
+
+        #if os(macOS)
+        if preferredGraphicsBackend == .openCL || preferredGraphicsBackend == .metal {
+            if let openCLScore = measureOpenCLGraphicsRendering() {
+                lastGraphicsBackendUsed = .openCL
+                return openCLScore
+            }
+        }
+        #endif
+
+        lastGraphicsBackendUsed = .legacy
+
         let frameCount = graphicsFrameCount
         let start = CFAbsoluteTimeGetCurrent()
         #if canImport(UIKit)
@@ -3125,6 +3265,340 @@ class Benchmark {
         let framesPerSecondEquivalent = Double(frameCount) / timeTaken
         return framesPerSecondEquivalent * 5.0
     }
+
+    #if canImport(Metal)
+    @_optimize(none)
+    private func measureMetalGraphicsRendering() -> Double? {
+        for workload in metalWorkloads {
+            if let score = runMetalGraphicsWorkload(
+                elementCount: workload.elementCount,
+                kernelIterations: workload.kernelIterations,
+                passCount: workload.passCount
+            ) {
+                return score
+            }
+        }
+
+        return nil
+    }
+
+    private var metalWorkloads: [(elementCount: Int, kernelIterations: UInt32, passCount: Int)] {
+        [
+            (elementCount: 1_048_576, kernelIterations: 224, passCount: 18),
+            (elementCount: 786_432, kernelIterations: 192, passCount: 18),
+            (elementCount: 524_288, kernelIterations: 160, passCount: 16)
+        ]
+    }
+
+    private func preferredMetalDevice() -> MTLDevice? {
+        #if os(macOS)
+        let devices = MTLCopyAllDevices()
+        return devices.first(where: { !$0.isRemovable }) ?? devices.first ?? MTLCreateSystemDefaultDevice()
+        #else
+        MTLCreateSystemDefaultDevice()
+        #endif
+    }
+
+    @_optimize(none)
+    private func runMetalGraphicsWorkload(elementCount: Int, kernelIterations: UInt32, passCount: Int) -> Double? {
+        guard let device = preferredMetalDevice(),
+              let commandQueue = device.makeCommandQueue(),
+              let pipelineState = makeMetalGraphicsPipeline(device: device) else {
+            return nil
+        }
+
+        commandQueue.label = "BencherGraphicsQueue"
+
+        let vectorStride = MemoryLayout<SIMD4<Float>>.stride
+        let bufferLength = elementCount * vectorStride
+        guard let outputBuffer = device.makeBuffer(length: bufferLength, options: .storageModeShared) else {
+            return nil
+        }
+
+        outputBuffer.label = "BencherGraphicsOutput"
+
+        let executionWidth = max(pipelineState.threadExecutionWidth, 1)
+        let maxThreads = max(pipelineState.maxTotalThreadsPerThreadgroup, executionWidth)
+        let threadgroupWidth = min(maxThreads, executionWidth * 8)
+        let threadsPerThreadgroup = MTLSize(width: threadgroupWidth, height: 1, depth: 1)
+        let threadsPerGrid = MTLSize(width: elementCount, height: 1, depth: 1)
+
+        guard warmMetalComputePipeline(
+            commandQueue: commandQueue,
+            pipelineState: pipelineState,
+            outputBuffer: outputBuffer,
+            threadsPerGrid: threadsPerGrid,
+            threadsPerThreadgroup: threadsPerThreadgroup,
+            kernelIterations: 16,
+            seed: 0
+        ) else {
+            return nil
+        }
+
+        let start = CFAbsoluteTimeGetCurrent()
+
+        for pass in 0..<passCount {
+            autoreleasepool {
+                guard let commandBuffer = commandQueue.makeCommandBuffer(),
+                      let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
+                    return
+                }
+
+                var passSeed = UInt32(pass)
+                var iterationCount = kernelIterations
+                computeEncoder.setComputePipelineState(pipelineState)
+                computeEncoder.setBuffer(outputBuffer, offset: 0, index: 0)
+                computeEncoder.setBytes(&iterationCount, length: MemoryLayout<UInt32>.stride, index: 1)
+                computeEncoder.setBytes(&passSeed, length: MemoryLayout<UInt32>.stride, index: 2)
+                computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+                computeEncoder.endEncoding()
+                commandBuffer.commit()
+                commandBuffer.waitUntilCompleted()
+
+                if commandBuffer.status != .completed {
+                    return
+                }
+            }
+        }
+
+        let timeTaken = CFAbsoluteTimeGetCurrent() - start
+        guard timeTaken > 0 else { return nil }
+
+        let values = outputBuffer.contents().bindMemory(to: SIMD4<Float>.self, capacity: elementCount)
+        var checksum = 0.0
+        let sampleStride = max(elementCount / 1024, 1)
+        for index in stride(from: 0, to: elementCount, by: sampleStride) {
+            let value = values[index]
+            checksum += Double(value.x + value.y + value.z + value.w)
+        }
+        BenchmarkBlackHole.consume(checksum)
+
+        let totalOperations = Double(elementCount) * Double(kernelIterations) * Double(passCount)
+        return totalOperations / timeTaken / 1_000_000
+    }
+
+    private func makeMetalGraphicsPipeline(device: MTLDevice) -> MTLComputePipelineState? {
+        let source = """
+        #include <metal_stdlib>
+        using namespace metal;
+
+        kernel void bencherGraphics(
+            device float4 *output [[buffer(0)]],
+            constant uint &iterations [[buffer(1)]],
+            constant uint &seed [[buffer(2)]],
+            uint gid [[thread_position_in_grid]]
+        ) {
+            float4 value = float4(
+                float(gid) * 0.000031f + float(seed) * 0.013f,
+                float(gid) * 0.000047f + 0.11f,
+                float(gid) * 0.000059f + 0.23f,
+                float(gid) * 0.000071f + 0.37f
+            );
+
+            for (uint i = 0; i < iterations; ++i) {
+                float4 rotated = value.yzwx;
+                value = native_sin(value * 1.017f + rotated * 0.913f + 0.07f);
+                value += native_cos(rotated * 1.031f + float(i) * 0.00091f + 0.13f);
+                value = native_sqrt(fabs(value) + 0.0001f);
+            }
+
+            output[gid] = value;
+        }
+        """
+
+        do {
+            let library = try device.makeLibrary(source: source, options: nil)
+            guard let function = library.makeFunction(name: "bencherGraphics") else {
+                return nil
+            }
+            return try device.makeComputePipelineState(function: function)
+        } catch {
+            return nil
+        }
+    }
+
+    private func warmMetalComputePipeline(
+        commandQueue: MTLCommandQueue,
+        pipelineState: MTLComputePipelineState,
+        outputBuffer: MTLBuffer,
+        threadsPerGrid: MTLSize,
+        threadsPerThreadgroup: MTLSize,
+        kernelIterations: UInt32,
+        seed: UInt32
+    ) -> Bool {
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
+              let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
+            return false
+        }
+
+        var warmIterations = kernelIterations
+        var warmSeed = seed
+        computeEncoder.setComputePipelineState(pipelineState)
+        computeEncoder.setBuffer(outputBuffer, offset: 0, index: 0)
+        computeEncoder.setBytes(&warmIterations, length: MemoryLayout<UInt32>.stride, index: 1)
+        computeEncoder.setBytes(&warmSeed, length: MemoryLayout<UInt32>.stride, index: 2)
+        computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+        computeEncoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        return commandBuffer.status == .completed
+    }
+    #endif
+
+    #if os(macOS)
+    @_optimize(none)
+    private func measureOpenCLGraphicsRendering() -> Double? {
+        var platformCount: cl_uint = 0
+        guard clGetPlatformIDs(0, nil, &platformCount) == CL_SUCCESS, platformCount > 0 else {
+            return nil
+        }
+
+        let platformCapacity = Int(platformCount)
+        let platforms = UnsafeMutablePointer<cl_platform_id?>.allocate(capacity: platformCapacity)
+        defer { platforms.deallocate() }
+
+        guard clGetPlatformIDs(platformCount, platforms, nil) == CL_SUCCESS else {
+            return nil
+        }
+
+        for index in 0..<platformCapacity {
+            guard let platform = platforms[index] else { continue }
+            if let score = runOpenCLGraphicsWorkload(on: platform) {
+                return score
+            }
+        }
+
+        return nil
+    }
+
+    private func runOpenCLGraphicsWorkload(on platform: cl_platform_id) -> Double? {
+        let deviceTypes: [cl_device_type] = [cl_device_type(CL_DEVICE_TYPE_GPU), cl_device_type(CL_DEVICE_TYPE_DEFAULT)]
+
+        for deviceType in deviceTypes {
+            var deviceCount: cl_uint = 0
+            let countStatus = clGetDeviceIDs(platform, deviceType, 0, nil, &deviceCount)
+            guard countStatus == CL_SUCCESS, deviceCount > 0 else { continue }
+
+            let devices = UnsafeMutablePointer<cl_device_id?>.allocate(capacity: Int(deviceCount))
+            defer { devices.deallocate() }
+
+            guard clGetDeviceIDs(platform, deviceType, deviceCount, devices, nil) == CL_SUCCESS,
+                  let device = devices[0] else {
+                continue
+            }
+
+            if let score = executeOpenCLGraphicsWorkload(device: device) {
+                return score
+            }
+        }
+
+        return nil
+    }
+
+    @_optimize(none)
+    private func executeOpenCLGraphicsWorkload(device: cl_device_id) -> Double? {
+        var deviceRef: cl_device_id? = device
+        var contextError: cl_int = 0
+        guard let context = clCreateContext(nil, 1, &deviceRef, nil, nil, &contextError),
+              contextError == CL_SUCCESS else {
+            return nil
+        }
+        defer { clReleaseContext(context) }
+
+        var queueError: cl_int = 0
+        guard let commandQueue = clCreateCommandQueue(context, device, 0, &queueError),
+              queueError == CL_SUCCESS else {
+            return nil
+        }
+        defer { clReleaseCommandQueue(commandQueue) }
+
+        let elementCount = max(graphicsFrameCount * 1024, 512 * 1024)
+        let bufferLength = elementCount * MemoryLayout<Float>.stride
+
+        var bufferError: cl_int = 0
+        guard let outputBuffer = clCreateBuffer(context, cl_mem_flags(CL_MEM_READ_WRITE), bufferLength, nil, &bufferError),
+              bufferError == CL_SUCCESS else {
+            return nil
+        }
+        defer { clReleaseMemObject(outputBuffer) }
+
+        let source = """
+        __kernel void bencherGraphics(__global float *output, float timeSeed) {
+            int gid = get_global_id(0);
+            float x = (float)gid * 0.00021f + timeSeed;
+            float y = native_sin(x) * native_cos(x * 0.51f);
+            float z = native_sqrt(fabs(y) + 1.0f) + native_log(x + 1.5f);
+            output[gid] = y + z;
+        }
+        """
+
+        let program: cl_program? = source.utf8CString.withUnsafeBufferPointer { buffer in
+            var sourcePointer = buffer.baseAddress
+            var sourceLength = buffer.count - 1
+            var programError: cl_int = 0
+            let createdProgram = clCreateProgramWithSource(context, 1, &sourcePointer, &sourceLength, &programError)
+            return programError == CL_SUCCESS ? createdProgram : nil
+        }
+        guard let program else { return nil }
+        defer { clReleaseProgram(program) }
+
+        guard clBuildProgram(program, 1, &deviceRef, nil, nil, nil) == CL_SUCCESS else {
+            return nil
+        }
+
+        var kernelError: cl_int = 0
+        guard let kernel = clCreateKernel(program, "bencherGraphics", &kernelError),
+              kernelError == CL_SUCCESS else {
+            return nil
+        }
+        defer { clReleaseKernel(kernel) }
+
+        var outputBufferRef: cl_mem? = outputBuffer
+        guard clSetKernelArg(kernel, 0, MemoryLayout<cl_mem?>.stride, &outputBufferRef) == CL_SUCCESS else {
+            return nil
+        }
+
+        let workItems = max(elementCount, 64 * 1024)
+        let globalWorkSize = [workItems]
+        let localWorkSize = [min(256, workItems)]
+        let passes = max(graphicsFrameCount / 30, 60)
+
+        let start = CFAbsoluteTimeGetCurrent()
+
+        for pass in 0..<passes {
+            var timeSeed = Float(pass) * 0.03125
+            guard clSetKernelArg(kernel, 1, MemoryLayout<Float>.stride, &timeSeed) == CL_SUCCESS else {
+                return nil
+            }
+
+            let enqueueStatus = clEnqueueNDRangeKernel(
+                commandQueue,
+                kernel,
+                1,
+                nil,
+                globalWorkSize,
+                localWorkSize,
+                0,
+                nil,
+                nil
+            )
+
+            guard enqueueStatus == CL_SUCCESS else {
+                return nil
+            }
+        }
+
+        guard clFinish(commandQueue) == CL_SUCCESS else {
+            return nil
+        }
+
+        let timeTaken = CFAbsoluteTimeGetCurrent() - start
+        guard timeTaken > 0 else { return nil }
+
+        let operations = Double(workItems * passes)
+        return operations / timeTaken / 100_000
+    }
+    #endif
 
     #if canImport(UIKit)
     @_optimize(none)
@@ -3332,6 +3806,7 @@ enum BenchmarkStorage {
                     ssdRawCombinedMBps: ssdRawCombinedMBps,
                     ssdRawReadMBps: ssdRawReadMBps,
                     ssdRawWriteMBps: ssdRawWriteMBps,
+                    graphicsBackend: item["graphicsBackend"] as? String ?? GraphicsBenchmarkBackend.legacy.rawValue,
                     graphicsScore: graphicsScore,
                     overallScore: overallScore,
                     timestamp: timestamp,
@@ -3491,6 +3966,7 @@ struct BenchmarkHistoryCSVDocument: FileDocument {
             "ssdRawCombinedMBps",
             "ssdRawReadMBps",
             "ssdRawWriteMBps",
+            "graphicsBackend",
             "graphicsScore",
             "overallScore",
             "timestamp",
@@ -3513,6 +3989,7 @@ struct BenchmarkHistoryCSVDocument: FileDocument {
                 String(format: "%.0f", result.ssdRawCombinedMBps),
                 String(format: "%.0f", result.ssdRawReadMBps),
                 String(format: "%.0f", result.ssdRawWriteMBps),
+                csvEscape(result.graphicsBackend),
                 String(format: "%.0f", result.graphicsScore),
                 String(format: "%.0f", result.overallScore),
                 formatter.string(from: result.timestamp),
@@ -3559,13 +4036,16 @@ struct BenchmarkHistoryCSVDocument: FileDocument {
             let ssdRawCombinedMBps = Double(columns[8]) ?? ssdScore
             let ssdRawReadMBps = Double(columns[9]) ?? ssdRawCombinedMBps
             let ssdRawWriteMBps = Double(columns[10]) ?? ssdRawCombinedMBps
-            let graphicsScore = Double(columns[11]) ?? 0
-            let overallScore = Double(columns[12]) ?? 0
-            let timestamp = formatter.date(from: columns[13]) ?? Date()
-            let thermalState = Int(columns[14]) ?? 0
+            let hasGraphicsBackendColumn = columns.count >= 17
+            let graphicsBackend = hasGraphicsBackendColumn ? columns[11] : GraphicsBenchmarkBackend.legacy.rawValue
+            let graphicsScore = Double(columns[hasGraphicsBackendColumn ? 12 : 11]) ?? 0
+            let overallScore = Double(columns[hasGraphicsBackendColumn ? 13 : 12]) ?? 0
+            let timestamp = formatter.date(from: columns[hasGraphicsBackendColumn ? 14 : 13]) ?? Date()
+            let thermalState = Int(columns[hasGraphicsBackendColumn ? 15 : 14]) ?? 0
             let wasConnectedToPower: Bool? = {
-                guard columns.count > 15 else { return nil }
-                switch columns[15].lowercased() {
+                let powerIndex = hasGraphicsBackendColumn ? 16 : 15
+                guard columns.count > powerIndex else { return nil }
+                switch columns[powerIndex].lowercased() {
                 case "true":
                     return true
                 case "false":
@@ -3591,6 +4071,7 @@ struct BenchmarkHistoryCSVDocument: FileDocument {
                 ssdRawCombinedMBps: ssdRawCombinedMBps,
                 ssdRawReadMBps: ssdRawReadMBps,
                 ssdRawWriteMBps: ssdRawWriteMBps,
+                graphicsBackend: graphicsBackend.isEmpty ? GraphicsBenchmarkBackend.legacy.rawValue : graphicsBackend,
                 graphicsScore: graphicsScore,
                 overallScore: overallScore,
                 timestamp: timestamp,
@@ -3660,6 +4141,14 @@ enum HistorySortOption: String, CaseIterable, Identifiable {
             return "Lowest"
         }
     }
+}
+
+private enum HistoryFilterChipID: CaseIterable {
+    case device
+    case intensity
+    case thermal
+    case power
+    case favourites
 }
 
 enum BencherTheme {
@@ -3872,6 +4361,7 @@ enum DeviceModel {
             "iPad11,2": "iPad mini (5th gen)",
             "iPad14,1": "iPad mini (6th gen)",
             "iPad14,2": "iPad mini (6th gen)",
+            "iPad16,1": "iPad mini (A17 Pro)",
 
             // Mac (common Apple silicon families)
             "MacBookAir10,1": "MacBook Air (M1, 2020)",
@@ -4269,6 +4759,12 @@ struct CompareResultsView: View {
                 )
 
                 comparisonHeaderTag(
+                    title: result.graphicsBackend,
+                    systemImage: "display",
+                    backgroundColor: Color.white.opacity(0.16)
+                )
+
+                comparisonHeaderTag(
                     title: thermalStateText(result.thermalState),
                     systemImage: "thermometer.medium",
                     backgroundColor: result.thermalState > 0 ? Color.orange.opacity(0.35) : Color.white.opacity(0.16)
@@ -4543,11 +5039,11 @@ struct TrendsView: View {
     }
 
     private func peakDay(for keyPath: KeyPath<BenchmarkResult, Double>) -> DailyTrendPoint? {
-        dailyTrendPoints.max(by: { $0.metricValue(for: keyPath) < $1.metricValue(for: keyPath) })
+        trendPoints(for: keyPath).max(by: { $0.metricValue(for: keyPath) < $1.metricValue(for: keyPath) })
     }
 
     private func lowestDay(for keyPath: KeyPath<BenchmarkResult, Double>) -> DailyTrendPoint? {
-        dailyTrendPoints.min(by: { $0.metricValue(for: keyPath) < $1.metricValue(for: keyPath) })
+        trendPoints(for: keyPath).min(by: { $0.metricValue(for: keyPath) < $1.metricValue(for: keyPath) })
     }
 
     private func startDate(for latestDate: Date) -> Date? {
@@ -4594,6 +5090,17 @@ struct TrendsView: View {
         return sorted.filter { $0.timestamp >= startDate }
     }
 
+    private var graphicsChronologicalScores: [BenchmarkResult] {
+        let sorted = baseFilteredScores
+            .filter { $0.graphicsBackend == GraphicsBenchmarkBackend.metal.rawValue }
+            .sorted(by: { $0.timestamp < $1.timestamp })
+        guard let latestDate = sorted.last?.timestamp,
+              let startDate = startDate(for: latestDate) else {
+            return sorted
+        }
+        return sorted.filter { $0.timestamp >= startDate }
+    }
+
     private var dailyTrendPoints: [DailyTrendPoint] {
         let calendar = Calendar.current
         let grouped = Dictionary(grouping: chronologicalScores) { result in
@@ -4604,6 +5111,22 @@ struct TrendsView: View {
             guard let runs = grouped[date]?.sorted(by: { $0.timestamp < $1.timestamp }) else { return nil }
             return DailyTrendPoint(date: date, runs: runs)
         }
+    }
+
+    private var dailyGraphicsTrendPoints: [DailyTrendPoint] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: graphicsChronologicalScores) { result in
+            calendar.startOfDay(for: result.timestamp)
+        }
+
+        return grouped.keys.sorted().compactMap { date in
+            guard let runs = grouped[date]?.sorted(by: { $0.timestamp < $1.timestamp }) else { return nil }
+            return DailyTrendPoint(date: date, runs: runs)
+        }
+    }
+
+    private func trendPoints(for keyPath: KeyPath<BenchmarkResult, Double>) -> [DailyTrendPoint] {
+        keyPath == \.graphicsScore ? dailyGraphicsTrendPoints : dailyTrendPoints
     }
 
     private var availableDevices: [String] {
@@ -4914,86 +5437,98 @@ struct TrendsView: View {
 
     @ViewBuilder
     private func metricChartSection(title: String, keyPath: KeyPath<BenchmarkResult, Double>, color: Color) -> some View {
+        let chartPoints = trendPoints(for: keyPath)
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.headline)
 
-            Chart(dailyTrendPoints) { point in
-                LineMark(
-                    x: .value("Date", point.date),
-                    y: .value(title, point.metricValue(for: keyPath))
-                )
-                .interpolationMethod(.catmullRom)
-                .foregroundStyle(color)
-
-                // Only show the default point if not selected and not peak/low
-                if point.id != selectedTrendPoint?.id,
-                   point.id != peakDay(for: keyPath)?.id,
-                   point.id != lowestDay(for: keyPath)?.id {
-                    PointMark(
+            if chartPoints.isEmpty {
+                Text(keyPath == \.graphicsScore
+                     ? "No Metal graphics runs match the current filters yet."
+                     : "No trend data matches the current filters yet.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+            } else {
+                Chart(chartPoints) { point in
+                    LineMark(
                         x: .value("Date", point.date),
                         y: .value(title, point.metricValue(for: keyPath))
                     )
+                    .interpolationMethod(.catmullRom)
                     .foregroundStyle(color)
-                }
 
-                if let selectedTrendPoint,
-                   selectedTrendPoint.id == point.id {
-                    PointMark(
-                        x: .value("Date", point.date),
-                        y: .value(title, point.metricValue(for: keyPath))
-                    )
-                    .symbolSize(120)
-                    .foregroundStyle(.purple)
-                }
-                
-                if let metricPeakDay = peakDay(for: keyPath), metricPeakDay.id == point.id {
-                    PointMark(
-                        x: .value("Date", point.date),
-                        y: .value(title, point.metricValue(for: keyPath))
-                    )
-                    .symbolSize(90)
-                    .foregroundStyle(.green)
-                    .annotation(position: .top) {
-                        Text("Peak")
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                            .background(Color.green.opacity(0.14))
-                            .clipShape(Capsule())
+                    if point.id != selectedTrendPoint?.id,
+                       point.id != peakDay(for: keyPath)?.id,
+                       point.id != lowestDay(for: keyPath)?.id {
+                        PointMark(
+                            x: .value("Date", point.date),
+                            y: .value(title, point.metricValue(for: keyPath))
+                        )
+                        .foregroundStyle(color)
                     }
-                }
 
-                if let metricLowestDay = lowestDay(for: keyPath), metricLowestDay.id == point.id {
-                    PointMark(
-                        x: .value("Date", point.date),
-                        y: .value(title, point.metricValue(for: keyPath))
-                    )
-                    .symbolSize(90)
-                    .foregroundStyle(.orange)
-                    .annotation(position: .bottom) {
-                        Text("Low")
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                            .background(Color.orange.opacity(0.14))
-                            .clipShape(Capsule())
+                    if let selectedTrendPoint,
+                       selectedTrendPoint.id == point.id {
+                        PointMark(
+                            x: .value("Date", point.date),
+                            y: .value(title, point.metricValue(for: keyPath))
+                        )
+                        .symbolSize(120)
+                        .foregroundStyle(.purple)
                     }
-                }
-            }
-            .chartXScale(domain: chartDateDomain ?? (dailyTrendPoints.first?.date ?? Date())...(dailyTrendPoints.last?.date ?? Date()))
-            .frame(height: 180)
-            .padding()
-            .background(Color.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 18))
-            .chartOverlay { proxy in
-                GeometryReader { geometry in
-                    Rectangle()
-                        .fill(Color.clear)
-                        .contentShape(Rectangle())
-                        .onTapGesture { location in
-                            selectMetricTrendResult(at: location, proxy: proxy, geometry: geometry, keyPath: keyPath)
+
+                    if let metricPeakDay = peakDay(for: keyPath), metricPeakDay.id == point.id {
+                        PointMark(
+                            x: .value("Date", point.date),
+                            y: .value(title, point.metricValue(for: keyPath))
+                        )
+                        .symbolSize(90)
+                        .foregroundStyle(.green)
+                        .annotation(position: .top) {
+                            Text("Peak")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                                .background(Color.green.opacity(0.14))
+                                .clipShape(Capsule())
                         }
+                    }
+
+                    if let metricLowestDay = lowestDay(for: keyPath), metricLowestDay.id == point.id {
+                        PointMark(
+                            x: .value("Date", point.date),
+                            y: .value(title, point.metricValue(for: keyPath))
+                        )
+                        .symbolSize(90)
+                        .foregroundStyle(.orange)
+                        .annotation(position: .bottom) {
+                            Text("Low")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                                .background(Color.orange.opacity(0.14))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                .chartXScale(domain: chartDateDomain ?? (chartPoints.first?.date ?? Date())...(chartPoints.last?.date ?? Date()))
+                .frame(height: 180)
+                .padding()
+                .background(Color.white.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        Rectangle()
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture { location in
+                                selectMetricTrendResult(at: location, proxy: proxy, geometry: geometry, keyPath: keyPath, points: chartPoints)
+                            }
+                    }
                 }
             }
 
@@ -5185,7 +5720,8 @@ struct TrendsView: View {
         at location: CGPoint,
         proxy: ChartProxy,
         geometry: GeometryProxy,
-        keyPath: KeyPath<BenchmarkResult, Double>
+        keyPath: KeyPath<BenchmarkResult, Double>,
+        points: [DailyTrendPoint]
     ) {
         guard let plotFrameAnchor = proxy.plotFrame else { return }
         let plotFrame = geometry[plotFrameAnchor]
@@ -5201,7 +5737,7 @@ struct TrendsView: View {
             return
         }
 
-        let nearest = dailyTrendPoints.min {
+        let nearest = points.min {
             let lhsDistance = abs($0.date.timeIntervalSince(selectedDate)) + abs($0.metricValue(for: keyPath) - selectedValue) * 120
             let rhsDistance = abs($1.date.timeIntervalSince(selectedDate)) + abs($1.metricValue(for: keyPath) - selectedValue) * 120
             return lhsDistance < rhsDistance
@@ -5275,6 +5811,9 @@ struct TrendsView: View {
                         Text(result.benchmarkIntensity)
                             .font(.caption)
                             .foregroundColor(.secondary)
+                        Text(result.graphicsBackend)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
 
                     Spacer()
@@ -5335,6 +5874,7 @@ struct SettingsView: View {
     @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "System"
     @AppStorage("preferredExportFormat") private var preferredExportFormat: String = "JSON"
     @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
+    @AppStorage("graphicsBenchmarkBackend") private var graphicsBenchmarkBackend: String = GraphicsBenchmarkBackend.metal.rawValue
 
     var body: some View {
         NavigationStack {
@@ -5440,6 +5980,24 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+
+                settingsSectionCard(
+                    title: "Graphics Benchmark",
+                    description: "Choose which rendering path Bencher uses for the graphics test."
+                ) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("Graphics Backend", selection: $graphicsBenchmarkBackend) {
+                            ForEach(GraphicsBenchmarkBackend.settingsOptions) { backend in
+                                Text(backend.rawValue).tag(backend.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text(GraphicsBenchmarkBackend.settingsHelpText)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             .frame(maxWidth: 760, alignment: .leading)
             .padding(.horizontal, 28)
@@ -5502,6 +6060,18 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            Section("Graphics Benchmark") {
+                Picker("Graphics Backend", selection: $graphicsBenchmarkBackend) {
+                    ForEach(GraphicsBenchmarkBackend.settingsOptions) { backend in
+                        Text(backend.rawValue).tag(backend.rawValue)
+                    }
+                }
+
+                Text(GraphicsBenchmarkBackend.settingsHelpText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
         #endif
     }
@@ -5553,6 +6123,7 @@ struct BenchmarkRunReportView: View {
                     reportCard(title: "Performance Tier", value: result.performanceTier, color: .green)
                     reportCard(title: "Likely Bottleneck", value: result.bottleneck, color: .orange)
                     reportCard(title: "Benchmark Type", value: result.benchmarkIntensity, color: .purple)
+                    reportCard(title: "Graphics Backend", value: result.graphicsBackend, color: .pink)
                     reportCard(title: "Thermal State", value: thermalStateText(result.thermalState), color: result.thermalState > 0 ? .orange : .green)
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -6020,9 +6591,19 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.96",
+            title: "Balls of Steel",
+            releaseDate: "Current Build",
+            changes: [
+                "Reworked the graphics benchmark so it leans more on actual GPU compute work instead of simpler copy-heavy behaviour.",
+                "Improved the Metal test path to make graphics runs more dependable and less likely to fall back unexpectedly.",
+                "Added clearer graphics backend labelling, so saved runs now show whether they were measured with Metal, OpenCL or the legacy path."
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.95",
             title: "Smoother Results",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Improved benchmark consistency so results feel far less jumpy between different ways of installing and launching the app.",
                 "Tidied up a few rough edges in the benchmark flow to make fresh installs behave more predictably.",
