@@ -25,7 +25,7 @@ import AppKit
 // MARK: - Main ContentView
 struct ContentView: View {
     @State private var scores: [BenchmarkResult] = BenchmarkStorage.load()
-    @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "System"
+    @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "Dark"
     @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
     @State private var selectedTab: String = "dashboard"
     @State private var pendingHistoryAction: DashboardHistoryAction? = nil
@@ -100,12 +100,6 @@ struct ContentView: View {
                     Label("Settings", systemImage: "gearshape")
                 }
                 .tag("settings")
-
-            UpdatesView()
-                .tabItem {
-                    Label("Updates", systemImage: "clock.badge.checkmark")
-                }
-                .tag("updates")
         }
         .preferredColorScheme(preferredColorScheme)
         .onAppear {
@@ -347,6 +341,7 @@ struct BenchmarkView: View {
     @State private var isRunning: Bool = false
     @State private var benchmarkComplete: Bool = false
     @State private var benchmarkFailedMessage: String? = nil
+    @State private var benchmarkValidationSummary: BenchmarkValidationSummary? = nil
 
     @State private var progressMessage: String = "Ready to benchmark!"
     @State private var overallProgress: Double = 0.0
@@ -385,6 +380,14 @@ struct BenchmarkView: View {
                             .background(Color.red.opacity(0.75))
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                             .padding(.horizontal)
+                    }
+
+                    if let benchmarkValidationSummary, benchmarkValidationSummary.reliability == .caution {
+                        benchmarkNotice(
+                            benchmarkValidationSummary.primaryMessage ?? "This benchmark completed, but the result is worth treating with a little caution.",
+                            tint: .orange,
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
                     }
 
                     benchmarkProgressSection
@@ -545,7 +548,7 @@ struct BenchmarkView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Welcome to Bencher")
                         .font(.largeTitle.bold())
-                    Text("Get to learn your CPU, memory, storage and graphics performance in one press.")
+                    Text("See how your CPU, memory, storage and graphics perform with one quick run.")
                         .font(.callout)
                         .foregroundColor(.secondary)
                 }
@@ -750,6 +753,7 @@ struct BenchmarkView: View {
         isRunning = true
         benchmarkComplete = false
         benchmarkFailedMessage = nil
+        benchmarkValidationSummary = nil
         progressMessage = "Starting benchmark..."
         overallProgress = 0.0
         taskProgress = 0.0
@@ -868,26 +872,31 @@ struct BenchmarkView: View {
             }
 
             DispatchQueue.main.async {
-                let calibratedSingleCore = calibratedScore(title: "Single-Core Score", rawScore: singleCoreResult)
-                let calibratedCPU = calibratedScore(title: "Multi-Core Score", rawScore: cpuResult)
-                let calibratedMemory = calibratedScore(title: "Memory Score", rawScore: memoryResult.score)
-                let calibratedSSD = calibratedScore(title: "SSD Speed Score", rawScore: ssdResult.score)
-                let calibratedGraphics = calibratedScore(title: "Graphics Score", rawScore: graphicsResult)
-
-                let baseline: Double = 1000.0
-                let normalizedSingleCore = calibratedSingleCore / baseline
-                let normalizedCPU = calibratedCPU / baseline
-                let normalizedMemory = calibratedMemory / baseline
-                let normalizedSSD = calibratedSSD / baseline
-                let normalizedGraphics = calibratedGraphics / baseline
-
-                let computedOverall = (
-                    normalizedSingleCore * 0.20 +
-                    normalizedCPU * 0.25 +
-                    normalizedMemory * 0.20 +
-                    normalizedSSD * 0.15 +
-                    normalizedGraphics * 0.20
-                ) * baseline
+                let rawMetrics = BenchmarkRawMetrics(
+                    singleCore: singleCoreResult,
+                    multiCore: cpuResult,
+                    memory: memoryResult.score,
+                    memoryThroughputMBps: memoryResult.throughputMBps,
+                    ssd: ssdResult.score,
+                    ssdCombinedMBps: ssdResult.combinedMBps,
+                    ssdReadMBps: ssdResult.readMBps,
+                    ssdWriteMBps: ssdResult.writeMBps,
+                    graphics: graphicsResult
+                )
+                let backendUsed = benchmark.lastGraphicsBackendUsed.rawValue
+                let validation = BenchmarkValidator.validate(
+                    rawMetrics: rawMetrics,
+                    intensity: benchmarkIntensity,
+                    graphicsBackend: backendUsed,
+                    thermalState: ProcessInfo.processInfo.thermalState.rawValue
+                )
+                let calibratedScores = BenchmarkScoreCalculator.calibratedScores(from: rawMetrics)
+                let calibratedSingleCore = calibratedScores[.singleCore] ?? 0
+                let calibratedCPU = calibratedScores[.multiCore] ?? 0
+                let calibratedMemory = calibratedScores[.memory] ?? 0
+                let calibratedSSD = calibratedScores[.ssd] ?? 0
+                let calibratedGraphics = calibratedScores[.graphics] ?? 0
+                let computedOverall = BenchmarkScoreCalculator.overallScore(from: calibratedScores)
 
                 singleCoreScore = calibratedSingleCore
                 cpuScore = calibratedCPU
@@ -899,15 +908,21 @@ struct BenchmarkView: View {
                 ssdRawReadMBps = ssdResult.readMBps.rounded()
                 ssdRawWriteMBps = ssdResult.writeMBps.rounded()
                 overallScore = computedOverall.rounded()
+                benchmarkValidationSummary = validation
 
                 taskProgress = 1.0
                 overallProgress = 1.0
-                progressMessage = "Benchmark complete!"
+                progressMessage = validation.shouldSave ? "Benchmark complete!" : "Benchmark finished, but this run was not saved."
                 isRunning = false
                 benchmarkComplete = true
-                Haptics.success()
+                benchmarkFailedMessage = validation.shouldSave ? nil : validation.primaryMessage
+                if validation.shouldSave {
+                    Haptics.success()
+                } else {
+                    Haptics.warning()
+                }
 
-                if let overall = overallScore {
+                if validation.shouldSave, let overall = overallScore {
                     let newResult = BenchmarkResult(
                         sessionID: UUID(),
                         deviceName: DeviceModel.currentDeviceName(),
@@ -923,12 +938,19 @@ struct BenchmarkView: View {
                         ssdRawCombinedMBps: ssdResult.combinedMBps.rounded(),
                         ssdRawReadMBps: ssdResult.readMBps.rounded(),
                         ssdRawWriteMBps: ssdResult.writeMBps.rounded(),
-                        graphicsBackend: benchmark.lastGraphicsBackendUsed.rawValue,
+                        graphicsBackend: backendUsed,
                         graphicsScore: calibratedGraphics,
+                        rawSingleCoreScore: rawMetrics.singleCore,
+                        rawMultiCoreScore: rawMetrics.multiCore,
+                        rawMemoryScore: rawMetrics.memory,
+                        rawSSDScore: rawMetrics.ssd,
+                        rawGraphicsScore: rawMetrics.graphics,
                         overallScore: overall,
                         timestamp: Date(),
                         thermalState: ProcessInfo.processInfo.thermalState.rawValue,
-                        wasConnectedToPower: currentPowerConnectionState()
+                        wasConnectedToPower: currentPowerConnectionState(),
+                        reliability: validation.reliability,
+                        validationMessages: validation.messages
                     )
                     scores.append(newResult)
                     BenchmarkStorage.save(scores)
@@ -1005,6 +1027,7 @@ struct BenchmarkView: View {
         isRunning = false
         benchmarkComplete = false
         benchmarkFailedMessage = nil
+        benchmarkValidationSummary = nil
         progressMessage = "Benchmark cancelled."
         overallProgress = 0.0
         taskProgress = 0.0
@@ -1023,30 +1046,31 @@ struct BenchmarkView: View {
         overallScore = nil
         benchmarkComplete = false
         benchmarkFailedMessage = nil
+        benchmarkValidationSummary = nil
         progressMessage = "Ready to benchmark!"
         overallProgress = 0.0
         taskProgress = 0.0
     }
 
     func calibratedScore(title: String, rawScore: Double) -> Double {
-        let factor: Double
+        let metric: BenchmarkMetricKind
 
         switch title {
         case "Single-Core Score":
-            factor = 1.0
+            metric = .singleCore
         case "Multi-Core Score":
-            factor = 0.85
+            metric = .multiCore
         case "Memory Score":
-            factor = 1.0
+            metric = .memory
         case "SSD Speed Score":
-            factor = 0.45
+            metric = .ssd
         case "Graphics Score":
-            factor = 0.14
+            metric = .graphics
         default:
-            factor = 1.0
+            metric = .singleCore
         }
 
-        return (rawScore * factor).rounded()
+        return BenchmarkScoreCalculator.calibratedScore(metric: metric, rawValue: rawScore)
     }
 
     func metricColor(title: String, score: Double) -> Color {
@@ -1333,7 +1357,7 @@ struct HistoryView: View {
                     }
                 }
             } message: {
-                Text("Select how many historic results to export.")
+                Text("Choose how many saved results you want to export.")
             }
             .sheet(isPresented: $isShowingCompareSheet, onDismiss: {
                 if horizontalSizeClass == .compact, shouldPresentPendingComparison, pendingComparisonResults.count == 2 {
@@ -2479,9 +2503,13 @@ struct DetailedResultView: View {
                 }
 
                 if result.thermalState > 0 {
-                    Text("This run may have been affected by thermal throttling.")
+                    Text("This run may have been affected because your device was getting too warm.")
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.orange)
+                }
+
+                if let validationMessage = result.validationMessages.first {
+                    benchmarkComparisonNotice(validationMessage)
                 }
 
                 if let comparisonWarningText {
@@ -2495,14 +2523,14 @@ struct DetailedResultView: View {
             ResultMetricView(
                 title: "Single-Core Score",
                 value: result.singleCoreScore,
-                description: "Measures peak performance of a single execution thread (a core). A higher score in this category indicates stronger responsiveness for everday tasks from surfing the web to opening apps and running some games.",
+                description: "Measures how fast your device handles work on a single core. Higher scores usually mean snappier everyday performance for things like browsing, opening apps and lighter games.",
                 deltaText: deltaText(current: result.singleCoreScore, previous: comparisonBase?.singleCoreScore)
             )
 
             ResultMetricView(
                 title: "Multi-Core Score",
                 value: result.cpuScore,
-                description: "Measures processor throughput under parallel (across multiple threads/cores) sustained mathematical workload. A higher score in this category indicates better performance and responsiveness for tasks that require a lot of CPU power, such as compiling code builds, video editing, or running AAA games.",
+                description: "Measures how well your processor handles heavier work spread across multiple cores. Higher scores usually mean better performance in demanding tasks like video editing, larger workloads and more intensive games.",
                 deltaText: deltaText(current: result.cpuScore, previous: comparisonBase?.cpuScore)
             )
 
@@ -2510,21 +2538,21 @@ struct DetailedResultView: View {
                 title: "Memory Score",
                 value: result.memoryScore,
                 description:
-                    Text(.init("Measures memory handling throughput using large in-memory arrays and repeated transformation work. A higher score in this category indicates better OS/device memory handling and responsiveness for tasks that require a lot of memory, such as video editing, video rendering, *Google Chrome* and some machine learning tasks. Raw throughput: \(String(format: "%.0f", result.memoryRawThroughputMBps)) MB/s.")),
+                    Text(.init("Measures how quickly your device can move and process data in memory. Higher scores usually help with heavier multitasking, large creative apps and other memory-hungry work. Raw throughput: \(String(format: "%.0f", result.memoryRawThroughputMBps)) MB/s.")),
                 deltaText: deltaText(current: result.memoryScore, previous: comparisonBase?.memoryScore)
             )
 
             ResultMetricView(
                 title: "SSD Speed Score",
                 value: result.ssdScore,
-                description: "Measures temporary file write and read performance using local device storage. A higher score indicates better read/write performance and responsiveness for tasks that require a lot of disk access, such as video editing, AAA gaming, launch times for the OS and applications. Raw combined speed: \(String(format: "%.0f", result.ssdRawCombinedMBps)) MB/s. Raw read/write: \(String(format: "%.0f", result.ssdRawReadMBps))/\(String(format: "%.0f", result.ssdRawWriteMBps)) MB/s.",
+                description: "Measures how quickly your device can read and write temporary files to local storage. Higher scores usually mean faster app launches, snappier file-heavy work and better performance in storage-intensive tasks. Raw combined speed: \(String(format: "%.0f", result.ssdRawCombinedMBps)) MB/s. Raw read/write: \(String(format: "%.0f", result.ssdRawReadMBps))/\(String(format: "%.0f", result.ssdRawWriteMBps)) MB/s.",
                 deltaText: deltaText(current: result.ssdScore, previous: comparisonBase?.ssdScore)
             )
 
             ResultMetricView(
                 title: "Graphics Score",
                 value: result.graphicsScore,
-                description: "Measures repeated off-screen rendering performance. A higher score indicates better performance and responsiveness for tasks that require a lot of graphics, such as animations, games, visual effects and graphically intensive UIs.",
+                description: "Measures graphics performance using repeated rendering work. Higher scores usually mean smoother animation, stronger game performance and better handling of visually demanding apps.",
                 deltaText: deltaText(current: result.graphicsScore, previous: comparisonBase?.graphicsScore)
             )
             
@@ -2815,7 +2843,7 @@ struct DetailedResultView: View {
 
     private func generateInsight() -> String {
         if result.ssdScore < 500 {
-            return "Storage performance is below expected range. This may indicate thermal throttling or background disk activity."
+            return "Storage performance is lower than expected. Your device may have been warm, or other activity may have been using the drive."
         }
         if result.cpuScore < result.singleCoreScore * 2 {
             return "Multi-core scaling is lower than expected. Not all cores may be fully utilised."
@@ -2927,10 +2955,17 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         case ssdRawWriteMBps
         case graphicsBackend
         case graphicsScore
+        case rawSingleCoreScore
+        case rawMultiCoreScore
+        case rawMemoryScore
+        case rawSSDScore
+        case rawGraphicsScore
         case overallScore
         case timestamp
         case thermalState
         case wasConnectedToPower
+        case reliability
+        case validationMessages
     }
 
     let thermalState: Int
@@ -2958,10 +2993,17 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
             ssdRawWriteMBps: ssdRawWriteMBps,
             graphicsBackend: graphicsBackend,
             graphicsScore: graphicsScore,
+            rawSingleCoreScore: rawSingleCoreScore,
+            rawMultiCoreScore: rawMultiCoreScore,
+            rawMemoryScore: rawMemoryScore,
+            rawSSDScore: rawSSDScore,
+            rawGraphicsScore: rawGraphicsScore,
             overallScore: overallScore,
             timestamp: timestamp,
             thermalState: thermalState,
-            wasConnectedToPower: wasConnectedToPower
+            wasConnectedToPower: wasConnectedToPower,
+            reliability: reliability,
+            validationMessages: validationMessages
         )
     }
 
@@ -2983,10 +3025,17 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         ssdRawWriteMBps: Double,
         graphicsBackend: String = GraphicsBenchmarkBackend.legacy.rawValue,
         graphicsScore: Double,
+        rawSingleCoreScore: Double? = nil,
+        rawMultiCoreScore: Double? = nil,
+        rawMemoryScore: Double? = nil,
+        rawSSDScore: Double? = nil,
+        rawGraphicsScore: Double? = nil,
         overallScore: Double,
         timestamp: Date,
         thermalState: Int,
-        wasConnectedToPower: Bool? = nil
+        wasConnectedToPower: Bool? = nil,
+        reliability: BenchmarkReliability = .good,
+        validationMessages: [String] = []
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -3005,10 +3054,17 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         self.ssdRawWriteMBps = ssdRawWriteMBps
         self.graphicsBackend = graphicsBackend
         self.graphicsScore = graphicsScore
+        self.rawSingleCoreScore = rawSingleCoreScore ?? singleCoreScore
+        self.rawMultiCoreScore = rawMultiCoreScore ?? cpuScore
+        self.rawMemoryScore = rawMemoryScore ?? memoryScore
+        self.rawSSDScore = rawSSDScore ?? ssdScore
+        self.rawGraphicsScore = rawGraphicsScore ?? graphicsScore
         self.overallScore = overallScore
         self.timestamp = timestamp
         self.thermalState = thermalState
         self.wasConnectedToPower = wasConnectedToPower
+        self.reliability = reliability
+        self.validationMessages = validationMessages
     }
 
     init(from decoder: Decoder) throws {
@@ -3031,10 +3087,17 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
         ssdRawWriteMBps = try container.decodeIfPresent(Double.self, forKey: .ssdRawWriteMBps) ?? ssdRawCombinedMBps
         graphicsBackend = try container.decodeIfPresent(String.self, forKey: .graphicsBackend) ?? GraphicsBenchmarkBackend.legacy.rawValue
         graphicsScore = try container.decodeIfPresent(Double.self, forKey: .graphicsScore) ?? 0
+        rawSingleCoreScore = try container.decodeIfPresent(Double.self, forKey: .rawSingleCoreScore) ?? singleCoreScore
+        rawMultiCoreScore = try container.decodeIfPresent(Double.self, forKey: .rawMultiCoreScore) ?? cpuScore
+        rawMemoryScore = try container.decodeIfPresent(Double.self, forKey: .rawMemoryScore) ?? memoryScore
+        rawSSDScore = try container.decodeIfPresent(Double.self, forKey: .rawSSDScore) ?? ssdScore
+        rawGraphicsScore = try container.decodeIfPresent(Double.self, forKey: .rawGraphicsScore) ?? graphicsScore
         overallScore = try container.decodeIfPresent(Double.self, forKey: .overallScore) ?? 0
         timestamp = try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
         thermalState = try container.decodeIfPresent(Int.self, forKey: .thermalState) ?? 0
         wasConnectedToPower = try container.decodeIfPresent(Bool.self, forKey: .wasConnectedToPower)
+        reliability = try container.decodeIfPresent(BenchmarkReliability.self, forKey: .reliability) ?? .good
+        validationMessages = try container.decodeIfPresent([String].self, forKey: .validationMessages) ?? []
     }
 
     let singleCoreScore: Double
@@ -3047,11 +3110,22 @@ struct BenchmarkResult: Identifiable, Equatable, Codable {
     let ssdRawWriteMBps: Double
     let graphicsBackend: String
     let graphicsScore: Double
+    let rawSingleCoreScore: Double
+    let rawMultiCoreScore: Double
+    let rawMemoryScore: Double
+    let rawSSDScore: Double
+    let rawGraphicsScore: Double
     let overallScore: Double
     let timestamp: Date
+    let reliability: BenchmarkReliability
+    let validationMessages: [String]
 }
 
 extension BenchmarkResult {
+    var hasValidationWarnings: Bool {
+        !validationMessages.isEmpty
+    }
+
     var performanceTier: String {
         switch overallScore {
         case 850...:
@@ -3229,7 +3303,7 @@ private func usesPreferredComparisonParameters(_ result: BenchmarkResult) -> Boo
     && result.graphicsBackend == GraphicsBenchmarkBackend.metal.rawValue
 }
 
-private func comparableBenchmarkBaseline(for result: BenchmarkResult, within scores: [BenchmarkResult]) -> BenchmarkResult? {
+func comparableBenchmarkBaseline(for result: BenchmarkResult, within scores: [BenchmarkResult]) -> BenchmarkResult? {
     scores
         .filter {
             $0.id != result.id
@@ -3253,11 +3327,11 @@ private func benchmarkComparisonWarning(primary: BenchmarkResult, secondary: Ben
         let usesPreferredSetup = usesPreferredComparisonParameters(primary)
             && usesPreferredComparisonParameters(secondary)
         guard !usesPreferredSetup else { return nil }
-        return "This comparison includes a run that was captured outside Bencher's usual setup. Balanced mode with Metal gives the fairest side-by-side match."
+        return "One of these runs used a less typical setup, so this side-by-side view is best treated as a rough guide. For the fairest match, compare Balanced runs using Metal."
     }
 
     guard primary.graphicsBackend == GraphicsBenchmarkBackend.legacy.rawValue else { return nil }
-    return "This run used Bencher's older graphics path, so its graphics result may not line up as neatly with newer runs."
+    return "This run used Bencher's older graphics method, so its graphics score may not line up perfectly with newer results."
 }
 
 private func benchmarkBackendFilterTitle(_ backend: String) -> String {
@@ -3487,12 +3561,20 @@ class Benchmark {
     @_optimize(none)
     private func measureMetalGraphicsRendering() -> Double? {
         for workload in metalWorkloads {
-            if let score = runMetalGraphicsWorkload(
-                elementCount: workload.elementCount,
-                kernelIterations: workload.kernelIterations,
-                passCount: workload.passCount
-            ) {
-                return score
+            var samples: [Double] = []
+
+            for _ in 0..<3 {
+                if let score = runMetalGraphicsWorkload(
+                    elementCount: workload.elementCount,
+                    kernelIterations: workload.kernelIterations,
+                    passCount: workload.passCount
+                ), score.isFinite, score > 0 {
+                    samples.append(score)
+                }
+            }
+
+            if let median = medianBenchmarkSample(samples) {
+                return median
             }
         }
 
@@ -3572,7 +3654,7 @@ class Benchmark {
                 commandBuffer.commit()
                 commandBuffer.waitUntilCompleted()
 
-                if commandBuffer.status != .completed {
+                if commandBuffer.status != .completed || commandBuffer.error != nil {
                     return
                 }
             }
@@ -3588,10 +3670,21 @@ class Benchmark {
             let value = values[index]
             checksum += Double(value.x + value.y + value.z + value.w)
         }
+        guard checksum.isFinite, checksum != 0 else { return nil }
         BenchmarkBlackHole.consume(checksum)
 
         let totalOperations = Double(elementCount) * Double(kernelIterations) * Double(passCount)
         return totalOperations / timeTaken / 1_000_000
+    }
+
+    private func medianBenchmarkSample(_ samples: [Double]) -> Double? {
+        let usableSamples = samples.filter { $0.isFinite && $0 > 0 }.sorted()
+        guard !usableSamples.isEmpty else { return nil }
+        let middleIndex = usableSamples.count / 2
+        if usableSamples.count.isMultiple(of: 2) {
+            return (usableSamples[middleIndex - 1] + usableSamples[middleIndex]) / 2
+        }
+        return usableSamples[middleIndex]
     }
 
     private func makeMetalGraphicsPipeline(device: MTLDevice) -> MTLComputePipelineState? {
@@ -5349,7 +5442,7 @@ struct TrendsView: View {
     }
     
     private var availableBenchmarkTypes: [String] {
-        ["Balanced", "Light", "Extreme", "All Types"]
+        ["All Types", "Balanced", "Light", "Extreme"]
     }
 
     private var availableGraphicsBackends: [String] {
@@ -5429,21 +5522,21 @@ struct TrendsView: View {
         let rangeSuffix = selectedTimeRange == .allTime ? "" : " in the selected time range"
 
         if selectedDeviceFilter != "All Devices" && selectedBenchmarkFilter != "All Types" && selectedGraphicsBackendFilter != "All Graphics Paths" {
-            return "No data available yet for \(selectedDeviceFilter) using \(selectedBenchmarkFilter) benchmarks on the \(selectedGraphicsBackendFilter) graphics path\(rangeSuffix)."
+            return "No results yet for \(selectedDeviceFilter) using \(selectedBenchmarkFilter) mode with \(selectedGraphicsBackendFilter)\(rangeSuffix)."
         }
         if selectedDeviceFilter != "All Devices" {
-            return "No data available yet for \(selectedDeviceFilter)\(rangeSuffix)."
+            return "No results yet for \(selectedDeviceFilter)\(rangeSuffix)."
         }
         if selectedBenchmarkFilter != "All Types" {
-            return "No data available yet for \(selectedBenchmarkFilter) benchmarks\(rangeSuffix)."
+            return "No results yet for \(selectedBenchmarkFilter) mode\(rangeSuffix)."
         }
         if selectedGraphicsBackendFilter != "All Graphics Paths" {
-            return "No data available yet for the \(selectedGraphicsBackendFilter) graphics path\(rangeSuffix)."
+            return "No results yet for \(selectedGraphicsBackendFilter)\(rangeSuffix)."
         }
         if selectedTimeRange != .allTime {
-            return "No data available yet in the selected time range."
+            return "No results yet in the selected time range."
         }
-        return "No data available yet"
+        return "No results yet"
     }
 
     private var trendsControlPanel: some View {
@@ -5452,7 +5545,7 @@ struct TrendsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Trend Controls")
                         .font(.headline)
-                    Text("Adjust what data is being compared and how much history stays visible on the charts.")
+                    Text("Choose what you want to compare and how much history appears on the charts.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -5482,7 +5575,7 @@ struct TrendsView: View {
                     }
                 }
 
-                Text("Switch between device types, benchmark types and graphics paths so trend data stays comparable and is not muddied by mixed benchmark setups.")
+                Text("Use these filters to keep your trend view focused on runs that are easier to compare fairly.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -5499,7 +5592,7 @@ struct TrendsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text("Focus your trend graphs on recent or long-term performance windows like 7 days, 1 month, 6 months or all time.")
+                Text("Focus on recent performance or zoom out to see the bigger picture over time.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -6127,13 +6220,14 @@ struct SettingsView: View {
     let latestResult: BenchmarkResult?
     @AppStorage("benchmarkIntensity") private var intensity: String = "Balanced"
     @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 1
-    @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "System"
+    @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "Dark"
     @AppStorage("preferredExportFormat") private var preferredExportFormat: String = "JSON"
     @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
     @AppStorage("graphicsBenchmarkBackend") private var graphicsBenchmarkBackend: String = GraphicsBenchmarkBackend.metal.rawValue
     @State private var includeLatestBenchmarkInFeedback: Bool = false
     @State private var feedbackMessage: String? = nil
     @State private var isShowingFeedbackAlert: Bool = false
+    @State private var isShowingUpdatesSheet: Bool = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -6145,6 +6239,11 @@ struct SettingsView: View {
             }, message: {
                 Text(feedbackMessage ?? "No message available.")
             })
+            #if !os(macOS)
+            .sheet(isPresented: $isShowingUpdatesSheet) {
+                UpdatesSheetView()
+            }
+            #endif
         }
     }
 
@@ -6156,7 +6255,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Preferences")
                         .font(.largeTitle.bold())
-                    Text("Set your default benchmark behavior, appearance and export format.")
+                    Text("Choose how Bencher should look and behave by default.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -6176,7 +6275,7 @@ struct SettingsView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.segmented)
-                            Text("Stored locally and used as your default benchmark intensity.")
+                            Text("This is the default benchmark mode Bencher will use when you start a new run.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -6209,7 +6308,7 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.segmented)
 
-                        Text("Choose automatic system appearance or force light or dark mode.")
+                        Text("Follow your device setting or keep Bencher in light or dark mode.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -6226,7 +6325,7 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.segmented)
 
-                        Text("Settings are stored locally and remain after restarting the app.")
+                        Text("Your preferred export format will stay selected the next time you export.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -6240,7 +6339,7 @@ struct SettingsView: View {
                         Toggle("Sync benchmark history with iCloud", isOn: $iCloudHistorySyncEnabled)
                             .toggleStyle(.switch)
 
-                        Text("When enabled, Bencher merges your local history into iCloud and keeps future benchmark history synced across your devices signed into the same Apple ID.")
+                        Text("When this is on, Bencher adds your current history to iCloud and keeps future results in sync across devices using the same Apple ID.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -6248,7 +6347,7 @@ struct SettingsView: View {
 
                 settingsSectionCard(
                     title: "Graphics Benchmark",
-                    description: "Choose which rendering path Bencher uses for the graphics test."
+                    description: "Choose which graphics method Bencher uses for the graphics test."
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("Graphics Backend", selection: $graphicsBenchmarkBackend) {
@@ -6347,6 +6446,18 @@ struct SettingsView: View {
 
             Section("Feedback") {
                 feedbackSectionContent
+            }
+
+            Section("Updates") {
+                Button {
+                    isShowingUpdatesSheet = true
+                } label: {
+                    Label("View Release Notes", systemImage: "clock.badge.checkmark")
+                }
+
+                Text("Browse recent changes and search for specific fixes or features.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         #endif
@@ -6468,9 +6579,7 @@ struct SettingsView: View {
     }
 
     private var appVersionString: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
-        return "\(version) (\(build))"
+        BencherAppMetadata.versionString
     }
 
     private var operatingSystemVersionString: String {
@@ -6812,7 +6921,7 @@ struct ReferenceDevicesView: View {
 
     private var resultPickerCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Historic Result")
+            Text("Saved Result")
                 .font(.headline)
             Button {
                 resultSearchText = ""
@@ -6821,7 +6930,7 @@ struct ReferenceDevicesView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
                         .foregroundColor(.blue)
-                    Text(selectedResult.map(referencePickerLabel(for:)) ?? "Choose a historic result")
+                    Text(selectedResult.map(referencePickerLabel(for:)) ?? "Choose a saved result")
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.primary)
                         .lineLimit(1)
@@ -7019,602 +7128,59 @@ private struct ReferenceEntry: Identifiable {
 
 // MARK: - Updates View
 struct UpdatesView: View {
-    private let updates: [AppUpdateEntry] = [
-        AppUpdateEntry(
-            version: "V0.99",
-            title: "Cleaner Trends on iPhone",
-            releaseDate: "Current Build",
-            changes: [
-                "Tidied up the Trends filters on iPhone so the labels no longer get awkwardly cut off in portrait mode.",
-                "Reworked that filter area to stack more naturally when space is tight, while keeping the wider layout unchanged elsewhere.",
-                "Left iPad, landscape iPhone and Mac layouts alone so the fix only affects the cramped portrait setup."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.98",
-            title: "Safer Storage & Feedback",
-            releaseDate: "Previous Build",
-            changes: [
-                "Moved the feedback contact details out of the main app code and tightened up how that information is handled behind the scenes.",
-                "Added stronger protection for saved benchmark history so your results are stored more securely while still syncing and loading as expected.",
-                "Smoothed out the app's read and write flow so older saved data keeps working properly after the security changes."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.97",
-            title: "Cleaner Steel & Comparisons",
-            releaseDate: "Previous Build",
-            changes: [
-                "Tidied up the benchmark warnings so older graphics runs are explained more clearly without cluttering normal result viewing.",
-                "Fixed the Mac compare and reference pickers so they open at a sensible height and actually show the full list of saved runs.",
-                "Kept refining comparison tools across History, Reference and Trends so matching runs are easier to line up properly."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.96",
-            title: "Balls of Steel",
-            releaseDate: "Previous Build",
-            changes: [
-                "Reworked the graphics benchmark so it leans more on actual GPU compute work instead of simpler copy-heavy behaviour.",
-                "Improved the Metal test path to make graphics runs more dependable and less likely to fall back unexpectedly.",
-                "Added clearer graphics backend labelling, so saved runs now show whether they were measured with Metal, OpenCL or the legacy path."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.95",
-            title: "Smoother Results",
-            releaseDate: "Previous Build",
-            changes: [
-                "Improved benchmark consistency so results feel far less jumpy between different ways of installing and launching the app.",
-                "Tidied up a few rough edges in the benchmark flow to make fresh installs behave more predictably.",
-                "Kept polishing the Mac version so it feels a little more settled overall."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.94",
-            title: "Mac Polish Pass",
-            releaseDate: "Previous Build",
-            changes: [
-                "Refined the Mac layout so the app feels more at home on a desktop window.",
-                "Adjusted spacing and sizing in a few places to stop panels from feeling oversized or cramped.",
-                "Made the settings and updates screens a bit easier on the eyes, especially on larger displays."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.93",
-            title: "History, But Tidier",
-            releaseDate: "Previous Build",
-            changes: [
-                "Reworked the Mac history view so it behaves more naturally when resizing the window.",
-                "Smoothed out the sidebar and detail layout to avoid awkward jumps while browsing old benchmark runs.",
-                "Made the overall Mac navigation feel closer to a proper desktop app instead of a straight tablet carry-over."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.92",
-            title: "Cloudy Skies with a Chance of Mac",
-            releaseDate: "Previous Build",
-            changes: [
-                "Added App Sandbox Support to allow for test builds of Bencher for MacOS.",
-                "Changed project permission settings of Bencher.",
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.91",
-            title: "Cloudy Skies+",
-            releaseDate: "Previous Build",
-            changes: [
-                "Changed program signing and capabilities.",
-                "Increased minimum iOS requirements to run Bencher (iOS 17).",
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.90",
-            title: "Cloudy Skies",
-            releaseDate: "Previous Build",
-            changes: [
-                "Added iCloud support for storing benchmark results.",
-                "Made iCloud support toggleable in settings.",
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.80",
-            title: "Mac to the Future",
-            releaseDate: "Previous Build",
-            changes: [
-                "Added full MacOS support.",
-                "Changed the settings view for MacOS users to make it more inline for the platforms' design philosophy.",
-                "Added a new side menu bar in MacOS that is similar to the iPadOS version but with a more streamlined Mac design.",
-                "Updated the presentation of updates in the MacOS version to make it look cleaner.",
-                "Reversed changes on the history sidebar and detailed result view to make it look more like the iPadOS version again, implementing a new design system instead to make it workon MacOS.",
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.70",
-            title: "Big Mac Energy",
-            releaseDate: "Older Build",
-            changes: [
-                "Added MacOS Catalyst support.",
-                "Added automatic update feature on device names recently added to the reference list that weren't originally",
-                "Added a history sidebar and detailed result view in MacOS like the iPadOS version.",
-                "Reworked History on MacOS to ensure the tab bar at the top is always visible.",
-                "Changed the close button in the reference tab to be a x-mark rather than text.",
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.62",
-            title: "Sheen and Polish+",
-            releaseDate: "Older Build",
-            changes: [
-                "Added a proper cross-platform app icon.",
-                "Removed the older deprecated way of implementing an app icon.",
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.61",
-            title: "Sheen and Polish",
-            releaseDate: "Older Build",
-            changes: [
-                "Changed descriptions of functions to make them more consistent with the rest of the app.",
-                "Reworked descriptions to make them more user-friendly and less programmer-esque language.",
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.60",
-            title: "Reference and Compare Search Improvements",
-            releaseDate: "Older Build",
-            changes: [
-                "Added searchable result selection to the Compare flow so large benchmark histories can be narrowed by device, score, date or mode.",
-                "Reworked the Reference tab result picker into a dedicated searchable chooser for better long-term scalability with many saved runs.",
-                "Restored the native searchable presentation for those picker flows after confirming the earlier lag was mainly a debug-time Xcode issue.",
-                "Improved result-picking usability across comparison-focused screens without changing comparison logic or saved benchmark data."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.59",
-            title: "Reference Tab Comparison Redesign",
-            releaseDate: "Older Build",
-            changes: [
-                "Replaced the old static Reference Devices page with a comparison view that lets you choose a saved historic benchmark result.",
-                "Added selected-result summary presentation in Reference so the chosen run’s score, device and benchmark mode stay visible while comparing.",
-                "Added broad reference-band comparisons for iPhone, iPad and Mac ranges so saved results can be judged against practical device classes more directly.",
-                "Improved the Reference tab from passive guidance into a more useful analysis surface tied to your own benchmark history."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.58",
-            title: "Benchmark Tab Visual Refresh",
-            releaseDate: "Older Build",
-            changes: [
-                "Redesigned the Benchmark tab with a stronger hero section, clearer progress presentation and improved visual hierarchy.",
-                "Added a more polished status strip for benchmark intensity, stability runs and current run state.",
-                "Improved live-results presentation so score cards and progress sections feel more intentional and easier to scan.",
-                "Kept benchmark logic unchanged while making the Benchmark tab feel more polished and product-like."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.57",
-            title: "Trends Presentation and Daily Result Refinements",
-            releaseDate: "Older Build",
-            changes: [
-                "Grouped Trends device and time-range controls into a single cleaner control panel with clearer filter labelling.",
-                "Improved Trends section-card styling so summaries, charts and recent-run areas feel more cohesive visually.",
-                "Refined selected-day presentation so same-day grouped points can show all runs from that day in a cleaner expanded layout.",
-                "Improved the overall Trends tab polish without changing chart calculations or benchmark data handling."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.56",
-            title: "Power State History Tracking and Filtering",
-            releaseDate: "Older Build",
-            changes: [
-                "Added saved power-state awareness so benchmark runs can record whether the device was on AC power when the run was captured.",
-                "Added AC-power visibility in detailed historic result views for stronger result context.",
-                "Added a new History secondary filter for power state alongside device, intensity and thermal filters.",
-                "Extended benchmark import and export support so saved power-state information remains portable."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.55",
-            title: "Trends Daily Aggregation and Same-Day Drilldown",
-            releaseDate: "Older Build",
-            changes: [
-                "Changed Trends charts so multiple benchmark runs on the same day are grouped into one daily average point instead of clumping or laddering.",
-                "Updated selected Trend points to represent the day-average score for that date rather than only one underlying run.",
-                "Added day-level drilldown so selecting a grouped day can still show every individual run captured on that date.",
-                "Improved the path from grouped trend selection back into History so individual same-day runs remain accessible."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.54",
-            title: "Benchmark Styling Simplification and History Menu Stability",
-            releaseDate: "Older Build",
-            changes: [
-                "Removed the old full-screen benchmark gradient background so the Benchmark tab now respects the app’s light and dark appearance more naturally.",
-                "Updated benchmark cards and summary surfaces to use cleaner adaptive materials instead of the older gradient-heavy presentation.",
-                "Refined History filter and action menus to reduce UIKit context-menu warnings seen during first interaction in development builds.",
-                "Improved visual consistency and interaction stability across Benchmark and History without changing saved results or benchmark scoring."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.53",
-            title: "Trends Time-Range Controls and Selection Accuracy",
-            releaseDate: "Older Build",
-            changes: [
-                "Added Trends time-range filtering with 7D, 1M, 3M, 6M, 1Y and All options.",
-                "Updated Trends chart scaling so changing the selected time range also updates the visible chart domain.",
-                "Improved trend-point selection accuracy by using both horizontal and vertical proximity when choosing the nearest benchmark run.",
-                "Fixed metric-chart Peak and Low annotations so they now reflect the active metric instead of incorrectly using overall score.",
-                "Updated selected trend markers so they render correctly when the chosen point is also the Peak or Low result.",
-                "Added a clearer Selected badge to trend result summary cards beneath the charts.",
-                "Improved the jump from Trends into History so selected chart runs can still open the matching detailed result view reliably.",
-                "Improved compact detail layouts by fixing missing horizontal padding in benchmark detail presentation on iPhone."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.52",
-            title: "Interactive Trends and Comparison Refinements",
-            releaseDate: "Older Build",
-            changes: [
-                "Added interactive Trends chart selection so tapping chart points now highlights the nearest benchmark run.",
-                "Added selected-run summary cards beneath trend charts showing the relevant metric value, device and timestamp.",
-                "Added an Open in History action from Trends so selected chart runs can jump directly into the matching History detail view.",
-                "Updated History and Trends coordination so selected trend results can open correctly on both iPhone and iPad flows.",
-                "Improved Compare view presentation by removing the redundant plain Compare title and keeping the richer Comparison heading.",
-                "Added crowned device names in the comparison header so the run leading the most main categories is clearly marked.",
-                "Improved comparison header chips so benchmark mode and thermal state stay on one line more reliably.",
-                "Refined comparison metric presentation by removing stray outer styling and keeping winner emphasis cleaner and more consistent.",
-                "Updated Trends chart hit-testing for modern iOS APIs by safely unwrapping plotFrame before using it."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.51",
-            title: "History Navigation and Detail View Refinements",
-            releaseDate: "Older Build",
-            changes: [
-                "Refined compact History result opening so iPhone now presents detailed benchmark results more reliably again.",
-                "Replaced the broken compact History detail popup flow with a cleaner full-screen presentation for better stability and scrolling.",
-                "Improved iPhone History result navigation so tapping a saved run no longer leaves detail presentation frozen or malformed.",
-                "Polished the History detail presentation and overall interaction flow between saved results and detailed benchmark analysis.",
-                "Adjusted the detailed result Report Card pills so Tier and Bottleneck cards feel less squashed on both iPhone and iPad.",
-                "Refined iPad History header controls so Compare and Export remain on one line more reliably in the sidebar."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.50",
-            title: "Phase 3 Visual Polish Completion",
-            releaseDate: "Older Build",
-            changes: [
-                "Completed the Phase 3 polish pass across Benchmark, Dashboard, History, Trends and detailed result views.",
-                "Improved the overall app feel with more consistent cards, chips, gradients, haptics and feedback patterns.",
-                "Refined both iPhone and iPad History layouts so the interface feels more native to each device class.",
-                "Improved the app from a functional benchmark tool into a more polished performance-analysis experience."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.49",
-            title: "History Layout Adaptation for iPhone and iPad",
-            releaseDate: "Older Build",
-            changes: [
-                "Updated the History header area so controls now scroll away naturally with content on iPhone instead of staying fixed at the top.",
-                "Added a more compact iPhone-only History header layout with tighter title, control and chip spacing.",
-                "Refined the iPad History header so Compare and Export stay on one line more reliably.",
-                "Improved History layout behaviour across different size classes without changing core workflows."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.48",
-            title: "History Selection Styling and iPad Detail Polish",
-            releaseDate: "Older Build",
-            changes: [
-                "Replaced the default iPad blue List selection highlight with a softer custom selection treatment.",
-                "Added a subtle border glow, shadow and lift effect to the selected History row for a more premium feel.",
-                "Improved selected-row emphasis without overwhelming the rest of the History list.",
-                "Refined History detail presentation so selection and focus feel cleaner on larger screens."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.47",
-            title: "History Row Card Polish",
-            releaseDate: "Older Build",
-            changes: [
-                "Redesigned History rows into richer card-style layouts with stronger hierarchy for score, device, date and status information.",
-                "Added reusable History status chips and tag chips for a cleaner, more glanceable presentation.",
-                "Improved favourite visibility, benchmark intensity visibility and thermal-state presentation in History rows.",
-                "Improved the visual consistency between History rows and the rest of the app’s newer card-based design."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.46",
-            title: "Detailed Result View Visual Alignment",
-            releaseDate: "Older Build",
-            changes: [
-                "Polished the detailed benchmark result view so it now visually aligns more closely with the upgraded History rows.",
-                "Upgraded the result summary card with clearer hero styling, richer status chips and improved metadata presentation.",
-                "Converted Notes & Tags in detailed results to chip-based presentation for stronger consistency.",
-                "Unified detailed result cards, report sections and metric cards with the shared app styling system."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.45",
-            title: "Import Transparency and Better Result Messaging",
-            releaseDate: "Older Build",
-            changes: [
-                "Improved import completion messaging so the pop-up now shows how many results were newly added versus ignored as duplicates.",
-                "Made history import behaviour more transparent when importing files that overlap with locally stored benchmark records.",
-                "Improved user confidence in import operations by reporting actual merge outcomes instead of only generic success messages."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.44",
-            title: "Shared Theme System and Visual Consistency",
-            releaseDate: "Older Build",
-            changes: [
-                "Added a shared BencherTheme system for hero gradients, card gradients and accent chip gradients.",
-                "Improved visual consistency across Dashboard, History, Trends, Score Cards and detail screens.",
-                "Reduced one-off styling differences by centralising core gradient and card presentation patterns."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.43",
-            title: "Animation and Haptics Feedback Pass",
-            releaseDate: "Older Build",
-            changes: [
-                "Added animated Score Card appearance so benchmark metrics now enter more smoothly.",
-                "Added subtle haptic feedback for benchmark completion, export readiness, import success, import failure and undo restore.",
-                "Improved tactile feedback and responsiveness so key actions feel more deliberate and polished."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.42",
-            title: "Dashboard and Trends Presentation Polish",
-            releaseDate: "Older Build",
-            changes: [
-                "Updated Dashboard cards and quick actions to use the shared visual styling system.",
-                "Improved the Trends empty state with a richer card-style presentation instead of plain text.",
-                "Improved Dashboard and Trends consistency so both now feel more integrated with the wider app design language."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.41",
-            title: "Phase 3 Polish Foundations",
-            releaseDate: "Older Build",
-            changes: [
-                "Started the Phase 3 polish pass focused on visual consistency, empty states, animation and feedback quality.",
-                "Began refining the app from a feature-complete prototype into a more polished end-user product.",
-                "Established the groundwork for broader card, chip, gradient and interaction improvements across the app."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.40",
-            title: "Undo for Deletions and Favourite Terminology Cleanup",
-            releaseDate: "Older Build",
-            changes: [
-                "Added an Undo action for the most recently deleted history item or deleted set of history items.",
-                "Added a restore banner in History so recently deleted benchmark runs can be brought back quickly.",
-                "Standardised user-facing naming from pinning to favouriting while keeping storage compatible internally.",
-                "Updated visible History indicators and swipe actions to use favourite star icons for consistency."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.39",
-            title: "Cleaner History Layout and Reduced Menu Clutter",
-            releaseDate: "Older Build",
-            changes: [
-                "Moved Compare and Export out of the ellipsis menu and into visible History actions.",
-                "Made sort controls visible at the top of History using a segmented control for faster access.",
-                "Moved core filters into a visible horizontal filter row instead of hiding them inside the menu.",
-                "Reduced History menu complexity so it now focuses on lower-frequency actions such as import, multi-delete and delete all."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.38",
-            title: "History Filter Chips and Empty-State Improvements",
-            releaseDate: "Older Build",
-            changes: [
-                "Added reusable filter chips for device, benchmark intensity, thermal state and favourites-only filtering.",
-                "Improved History empty states so users get clearer guidance when no history matches the current search or filters.",
-                "Improved top-of-screen History controls for iPad and compact layouts by reducing visual crowding and truncation."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.37",
-            title: "History Search and Advanced Filtering",
-            releaseDate: "Older Build",
-            changes: [
-                "Added History search across device name, notes and tags.",
-                "Added History filters for device, benchmark intensity and thermal state.",
-                "Added a favourites-only History filter for quickly isolating important benchmark runs.",
-                "Updated History selection and detail behaviour so filtered history remains browsable and stable."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.36",
-            title: "Favourites and Pinning Support",
-            releaseDate: "Older Build",
-            changes: [
-                "Added favourite support for benchmark runs while preserving backwards-compatible saved history decoding.",
-                "Added swipe actions to favourite or unfavourite runs directly from History.",
-                "Added favourite indicators in History rows and detailed benchmark results.",
-                "Improved benchmark metadata persistence so favourite state is retained across saves, reloads and imports."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.35",
-            title: "History Multi-Delete Workflow",
-            releaseDate: "Older Build",
-            changes: [
-                "Added a dedicated multi-delete screen for removing several benchmark runs in one action.",
-                "Added multi-select deletion confirmation flow with clear visual selection feedback.",
-                "Improved History maintenance for larger saved benchmark libraries by reducing one-by-one deletion effort."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.34",
-            title: "Delete All History Management",
-            releaseDate: "Older Build",
-            changes: [
-                "Added Delete All History as a dedicated destructive action with confirmation.",
-                "Improved History state cleanup when all benchmark runs are removed, including selection and comparison reset behaviour.",
-                "Improved long-term history maintenance for users who want to reset benchmark archives quickly."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.33",
-            title: "Dashboard to History Action Handoff",
-            releaseDate: "Older Build",
-            changes: [
-                "Improved Dashboard quick actions so Compare and Export now launch the intended History workflows after tab switching.",
-                "Added shared pending History action handling to coordinate navigation-driven actions more reliably.",
-                "Improved Dashboard to History flow so quick actions behave more like direct commands instead of simple tab jumps."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.32",
-            title: "History Sort Labelling and Usability Refinements",
-            releaseDate: "Older Build",
-            changes: [
-                "Shortened History sort labels to Newest, Oldest, Highest and Lowest to prevent segmented control truncation.",
-                "Improved top-level History usability on tighter widths by reducing control text overflow.",
-                "Improved visual consistency between sort controls and the new visible History management actions."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.31",
-            title: "Phase 2 History Management Foundations",
-            releaseDate: "Older Build",
-            changes: [
-                "Started the Phase 2 History management work focused on search, filtering, favourites and safer deletion workflows.",
-                "Expanded benchmark history records to support richer management features without breaking backwards compatibility.",
-                "Improved History from a simple archive into a more powerful benchmark management surface."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.3",
-            title: "Reference Devices, Run Reports and Notes & Tags",
-            releaseDate: "Older Build",
-            changes: [
-                "Added a new Reference Devices tab with broad guidance ranges for iPhone, iPad and Mac classes.",
-                "Added a post-run Benchmark Report screen that appears after a benchmark completes and summarises the result.",
-                "Added editable notes and tags for benchmark runs, including a dedicated editor from the History screen.",
-                "Extended benchmark history records with session IDs for stronger long-term metadata and grouping support.",
-                "Added a Report Card section in detailed benchmark results with performance tier, bottleneck detection and richer guidance.",
-                "Improved score card visuals with richer gradient styling and more polished card backgrounds.",
-                "Improved device-aware reference guidance so detailed results now present ranges more fairly based on detected device class."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.22",
-            title: "Smarter Export Options, Faster Exporting and Cleaner History Actions",
-            releaseDate: "Older Build",
-            changes: [
-                "Updated export so users can choose how many historic results to export, including the last 1, 5, 10, 15, 20 or all results depending on availability.",
-                "Improved export performance by moving export preparation off the main thread for both JSON and CSV export.",
-                "Added a visible export progress banner so the app shows when an export is being prepared.",
-                "Improved History toolbar layout on iPad by grouping Sort, Export, Import and Compare into a single Actions menu.",
-                "Fixed export reliability using a share-sheet based export flow backed by temporary files.",
-                "Tidied CSV export generation for better long-term efficiency and reduced unnecessary processing overhead.",
-                "Cleaned up remaining file I/O warnings in the SSD benchmark implementation."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.21",
-            title: "Additional Export and Import Formats",
-            releaseDate: "Older Build",
-            changes: [
-                "Added CSV export support alongside JSON export.",
-                "Updated the Settings tab so the preferred export format can now be set to JSON or CSV.",
-                "Extended import support so benchmark history can now be imported from any supported format, including JSON and CSV.",
-                "Improved history portability by allowing the same benchmark records to move between different export/import file types.",
-                "Added different messages for various device thermal levels when running benchmarks."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.20",
-            title: "History Deletion, Device Filtering and Comparison Visual Refresh",
-            releaseDate: "Older Build",
-            changes: [
-                "Added swipe-to-delete for individual benchmark history results directly from the History list.",
-                "Improved History state handling so deleting selected or compared runs safely clears related comparison state.",
-                "Added device-type filtering in Trends so you can switch between devices such as iPhone, iPad and Mac when reviewing performance history.",
-                "Improved Trends empty-state messaging so filtered views clearly show when no runs exist for the selected device.",
-                "Refreshed the comparison screen with more colourful visuals, including gradient headers, coloured result cards and clearer metric presentation.",
-                "Improved comparison readability with stronger spacing, better visual hierarchy and clearer separation between the two benchmark runs."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.17",
-            title: "Comparison UX Fixes and Layout Improvements",
-            releaseDate: "Older Build",
-            changes: [
-                "Fixed an issue where the comparison screen would fail to open on the first attempt on compact devices.",
-                "Improved the comparison flow so results reliably open after selecting two benchmark runs.",
-                "Adjusted comparison metric layout so values align correctly beneath each benchmark header.",
-                "Refined spacing and indentation of comparison results for better readability and visual hierarchy."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.16",
-            title: "Benchmark Test Type Tracking",
-            releaseDate: "Older Build",
-            changes: [
-                "Added benchmark test type tracking so each run now records whether it was Light, Balanced or Extreme.",
-                "Added the saved test type to History rows so you can see what benchmark mode was used for each run.",
-                "Added the saved test type to the detailed result view for clearer context when reviewing previous benchmarks.",
-                "Extended saved benchmark history so the selected benchmark mode is preserved locally and remains import/export compatible."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.15",
-            title: "Compare Mode, Rich Trends, Appearance Settings and Thermal Visibility",
-            releaseDate: "Older Build",
-            changes: [
-                "Added a proper compare mode flow where selecting two benchmark runs and pressing Done opens a split comparison view.",
-                "Added side-by-side metric comparison for overall, CPU, memory, SSD, graphics and raw RAM / SSD readings.",
-                "Added a quick return path from comparison back to the default History detail view.",
-                "Greatly expanded the Trends tab with summary cards, overall trend chart, CPU trend chart, graphics trend chart, SSD trend chart and recent runs.",
-                "Added local persistence for appearance settings and benchmark preferences using AppStorage.",
-                "Added app appearance selection with System, Light and Dark modes.",
-                "Improved History so it now shows when thermals may have affected benchmark performance.",
-                "Added thermal state visibility in the detailed result view, including a throttling warning for affected runs.",
-                "Expanded the compare and trends experience so the app now behaves more like a performance analysis tool rather than only a benchmark runner."
-            ]
-        ),
-        AppUpdateEntry(
-            version: "V0.10",
-            title: "Trends, Insights, Settings and Update History",
-            releaseDate: "Older Build",
-            changes: [
-                "Added a Trends tab to start tracking benchmark performance over time.",
-                "Added a Settings tab with benchmark intensity options.",
-                "Added thermal awareness so warm devices can warn that results may be reduced.",
-                "Added an insights panel in detailed benchmark results.",
-                "Added percentile-style performance guidance.",
-                "Added history sorting by newest, oldest, highest score and lowest score.",
-                "Improved history records with device name and raw RAM / SSD readings.",
-                "Improved SSD benchmarking and score calibration.",
-                "Added this Updates tab so users can review what changed in each release."
-            ]
-        )
-    ]
-
-    private var currentBuildUpdates: [AppUpdateEntry] {
-        updates.filter { $0.releaseDate == "Current Build" }
+    var body: some View {
+        NavigationStack {
+            UpdatesBrowserContent()
+            .navigationTitle("Updates")
+        }
     }
+}
 
-    private var previousBuildUpdates: [AppUpdateEntry] {
-        updates.filter { $0.releaseDate == "Previous Build" }
-    }
-
-    private var olderBuildUpdates: [AppUpdateEntry] {
-        updates.filter { $0.releaseDate == "Older Build" }
-    }
+private struct UpdatesSheetView: View {
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            updatesContent
-            .navigationTitle("Updates")
+            UpdatesBrowserContent()
+                .navigationTitle("Updates")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") {
+                            dismiss()
+                        }
+                    }
+                }
         }
+        #if os(iOS)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        #endif
+    }
+}
+
+private struct UpdatesBrowserContent: View {
+    @State private var searchText: String = ""
+    private let updates: [AppUpdateEntry] = BencherReleaseNotesEntries
+
+    private var filteredUpdates: [AppUpdateEntry] {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return updates }
+
+        return updates.filter { update in
+            update.searchableText.localizedCaseInsensitiveContains(trimmed)
+        }
+    }
+
+    private var currentBuildUpdates: [AppUpdateEntry] {
+        filteredUpdates.filter { $0.releaseDate == "Current Build" }
+    }
+
+    private var previousBuildUpdates: [AppUpdateEntry] {
+        filteredUpdates.filter { $0.releaseDate == "Previous Build" }
+    }
+
+    private var olderBuildUpdates: [AppUpdateEntry] {
+        filteredUpdates.filter { $0.releaseDate == "Older Build" }
     }
 
     @ViewBuilder
@@ -7642,6 +7208,19 @@ struct UpdatesView: View {
         .background(BencherPlatformColors.systemBackground)
         #else
         List {
+            if filteredUpdates.isEmpty {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("No matching updates")
+                            .font(.headline)
+                        Text("Try a version number, feature name or keyword from the release notes.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+
             if !currentBuildUpdates.isEmpty {
                 Section("Current Build") {
                     ForEach(currentBuildUpdates) { update in
@@ -7667,6 +7246,11 @@ struct UpdatesView: View {
             }
         }
         #endif
+    }
+
+    var body: some View {
+        updatesContent
+            .searchable(text: $searchText, prompt: "Search updates")
     }
 
     @ViewBuilder
@@ -7728,6 +7312,10 @@ struct AppUpdateEntry: Identifiable {
     let title: String
     let releaseDate: String
     let changes: [String]
+
+    var searchableText: String {
+        ([version, title, releaseDate] + changes).joined(separator: " ")
+    }
 }
 
 // MARK: - Dashboard View
@@ -7747,15 +7335,15 @@ struct DashboardView: View {
 
     private var trendSummary: String {
         guard let latest = latestResult else {
-            return "No benchmark history yet. Run your first benchmark to start building a profile."
+            return "No benchmark history yet. Run your first benchmark to get started."
         }
         guard let previous = previousComparableResult else {
-            return "No comparable recent trend to show here yet."
+            return "No matching recent trend to show here yet."
         }
 
         let delta = latest.overallScore - previous.overallScore
         let sign = delta >= 0 ? "+" : ""
-        return "Latest overall score is \(sign)\(String(format: "%.0f", delta)) compared with the most recent run from the same device, benchmark mode and graphics path."
+        return "Your latest overall score is \(sign)\(String(format: "%.0f", delta)) compared with the most recent run from the same device, benchmark mode and graphics method."
     }
 
     var body: some View {
@@ -7765,7 +7353,7 @@ struct DashboardView: View {
                     Text("Your Briefing")
                         .font(.largeTitle.bold())
 
-                    Text("Welcome to Bencher, your one-stop shop for performance benchmarking, comparisons and better design :p")
+                    Text("A clean place to benchmark your device, compare runs and keep an eye on performance over time.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
@@ -7782,11 +7370,11 @@ struct DashboardView: View {
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundColor(.secondary)
 
-                            Text("Benchmark type: \(latestResult.benchmarkIntensity)")
+                            Text("Benchmark mode: \(latestResult.benchmarkIntensity)")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundColor(.secondary)
 
-                            Text("Graphics path: \(latestResult.graphicsBackend)")
+                            Text("Graphics method: \(latestResult.graphicsBackend)")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundColor(.secondary)
 
@@ -7802,7 +7390,7 @@ struct DashboardView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("No benchmark yet")
                                 .font(.headline)
-                            Text("Run your first benchmark to populate the dashboard with latest-result insights and trend movement.")
+                            Text("Run your first benchmark to start filling the dashboard with results and trend highlights.")
                                 .foregroundColor(.secondary)
                         }
                         .padding()
@@ -7830,7 +7418,7 @@ struct DashboardView: View {
                             Button {
                                 selectedTab = "benchmark"
                             } label: {
-                                dashboardActionRow(title: "Run Benchmark", subtitle: "Go straight to the benchmark runner.", systemImage: "speedometer")
+                                dashboardActionRow(title: "Run Benchmark", subtitle: "Jump straight into a new benchmark run.", systemImage: "speedometer")
                             }
                             .buttonStyle(.plain)
 
@@ -7838,7 +7426,7 @@ struct DashboardView: View {
                                 pendingHistoryAction = .compare
                                 selectedTab = "history"
                             } label: {
-                                dashboardActionRow(title: "Compare", subtitle: "Open History and launch compare mode.", systemImage: "rectangle.split.2x1")
+                                dashboardActionRow(title: "Compare", subtitle: "Open History and compare two saved runs.", systemImage: "rectangle.split.2x1")
                             }
                             .buttonStyle(.plain)
 
@@ -7846,14 +7434,14 @@ struct DashboardView: View {
                                 pendingHistoryAction = .export
                                 selectedTab = "history"
                             } label: {
-                                dashboardActionRow(title: "Export", subtitle: "Open History and launch export options.", systemImage: "square.and.arrow.up")
+                                dashboardActionRow(title: "Export", subtitle: "Open History and choose what you want to export.", systemImage: "square.and.arrow.up")
                             }
                             .buttonStyle(.plain)
 
                             Button {
                                 selectedTab = "trends"
                             } label: {
-                                dashboardActionRow(title: "View Trends", subtitle: "Open Trends for filtered performance history.", systemImage: "chart.line.uptrend.xyaxis")
+                                dashboardActionRow(title: "View Trends", subtitle: "Open Trends to explore your performance history.", systemImage: "chart.line.uptrend.xyaxis")
                             }
                             .buttonStyle(.plain)
                         }
