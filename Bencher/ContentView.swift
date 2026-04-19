@@ -32,6 +32,14 @@ struct ContentView: View {
     @State private var pendingHistorySelection: BenchmarkResult.ID? = nil
     @State private var hasPreparedStorage: Bool = false
 
+    private var usesSettingsHostedUpdatesOnIOS: Bool {
+        #if canImport(UIKit)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         #if os(macOS)
         NavigationSplitView {
@@ -100,6 +108,14 @@ struct ContentView: View {
                     Label("Settings", systemImage: "gearshape")
                 }
                 .tag("settings")
+
+            if !usesSettingsHostedUpdatesOnIOS {
+                UpdatesView()
+                    .tabItem {
+                        Label("Updates", systemImage: "clock.badge.checkmark")
+                    }
+                    .tag("updates")
+            }
         }
         .preferredColorScheme(preferredColorScheme)
         .onAppear {
@@ -6230,6 +6246,14 @@ struct SettingsView: View {
     @State private var isShowingUpdatesSheet: Bool = false
     @Environment(\.openURL) private var openURL
 
+    private var usesSettingsHostedUpdatesOnIOS: Bool {
+        #if canImport(UIKit)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         NavigationStack {
             settingsContent
@@ -6239,11 +6263,9 @@ struct SettingsView: View {
             }, message: {
                 Text(feedbackMessage ?? "No message available.")
             })
-            #if !os(macOS)
             .sheet(isPresented: $isShowingUpdatesSheet) {
                 UpdatesSheetView()
             }
-            #endif
         }
     }
 
@@ -6448,16 +6470,18 @@ struct SettingsView: View {
                 feedbackSectionContent
             }
 
-            Section("Updates") {
-                Button {
-                    isShowingUpdatesSheet = true
-                } label: {
-                    Label("View Release Notes", systemImage: "clock.badge.checkmark")
-                }
+            if usesSettingsHostedUpdatesOnIOS {
+                Section("Updates") {
+                    Button {
+                        isShowingUpdatesSheet = true
+                    } label: {
+                        Label("View Release Notes", systemImage: "clock.badge.checkmark")
+                    }
 
-                Text("Browse recent changes and search for specific fixes or features.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    Text("Browse recent changes and search for specific fixes or features.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
         #endif
@@ -6477,7 +6501,10 @@ struct SettingsView: View {
         Button {
             sendFeedback()
         } label: {
-            Label("Send Feedback", systemImage: "envelope")
+            HStack(spacing: 8) {
+                Image(systemName: "envelope")
+                Text("Send Feedback")
+            }
         }
         .buttonStyle(.borderedProminent)
     }
