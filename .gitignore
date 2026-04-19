@@ -34,3 +34,7 @@ fastlane/test_output/
 
 # macOS
 .DS_Store
+
+# Local feedback secrets
+Bencher/Bencher/FeedbackSecrets.enc.json
+Bencher/Bencher/FeedbackSecrets.key

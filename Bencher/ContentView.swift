@@ -8,6 +8,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Charts
+import CryptoKit
 #if canImport(Metal)
 import Metal
 #endif
@@ -94,7 +95,7 @@ struct ContentView: View {
                 }
                 .tag("reference")
 
-            SettingsView()
+            SettingsView(latestResult: scores.sorted(by: { $0.timestamp > $1.timestamp }).first)
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
@@ -160,7 +161,7 @@ struct ContentView: View {
         case "reference":
             ReferenceDevicesView(scores: scores)
         case "settings":
-            SettingsView()
+            SettingsView(latestResult: scores.sorted(by: { $0.timestamp > $1.timestamp }).first)
         case "updates":
             UpdatesView()
         default:
@@ -194,6 +195,87 @@ enum BencherPlatformColors {
         #else
         Color.gray.opacity(0.1)
         #endif
+    }
+}
+
+private enum BencherSupport {
+    private struct EncryptedFeedbackSecrets: Decodable {
+        let feedbackEmailBox: String
+    }
+
+    private static let keyResourceName = "FeedbackSecrets"
+    private static let keyResourceExtension = "key"
+    private static let encryptedResourceName = "FeedbackSecrets"
+    private static let encryptedResourceExtension = "enc.json"
+
+    static func feedbackEmailAddress() -> String? {
+        guard Bundle.main.url(forResource: keyResourceName, withExtension: keyResourceExtension) != nil,
+              let encryptedURL = Bundle.main.url(forResource: encryptedResourceName, withExtension: encryptedResourceExtension),
+              let encryptedData = try? Data(contentsOf: encryptedURL),
+              let secrets = try? JSONDecoder().decode(EncryptedFeedbackSecrets.self, from: encryptedData),
+              let combinedBox = Data(base64Encoded: secrets.feedbackEmailBox),
+              let sealedBox = try? AES.GCM.SealedBox(combined: combinedBox) else {
+            return nil
+        }
+
+        guard let key = BencherCrypto.feedbackKey() else { return nil }
+        guard let decryptedData = try? AES.GCM.open(sealedBox, using: key),
+              let emailAddress = String(data: decryptedData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !emailAddress.isEmpty else {
+            return nil
+        }
+
+        return emailAddress
+    }
+}
+
+private enum BencherCrypto {
+    private static let masterKeyResourceName = "FeedbackSecrets"
+    private static let masterKeyResourceExtension = "key"
+
+    static func encryptStoragePayload(_ data: Data) -> Data? {
+        guard let key = derivedKey(context: "benchmark-storage") else { return nil }
+        guard let sealed = try? AES.GCM.seal(data, using: key).combined else { return nil }
+        return sealed
+    }
+
+    static func decryptStoragePayload(_ data: Data) -> Data? {
+        guard let key = derivedKey(context: "benchmark-storage"),
+              let box = try? AES.GCM.SealedBox(combined: data),
+              let opened = try? AES.GCM.open(box, using: key) else {
+            return nil
+        }
+        return opened
+    }
+
+    static func feedbackKey() -> SymmetricKey? {
+        guard let keyData = masterKeyData() else { return nil }
+        return SymmetricKey(data: keyData)
+    }
+
+    private static func derivedKey(context: String) -> SymmetricKey? {
+        guard let masterKey = feedbackKey() else { return nil }
+        let salt = Data("Bencher.StandardEncryption.v1".utf8)
+        let info = Data(context.utf8)
+        return HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: masterKey,
+            salt: salt,
+            info: info,
+            outputByteCount: 32
+        )
+    }
+
+    private static func masterKeyData() -> Data? {
+        guard let keyURL = Bundle.main.url(forResource: masterKeyResourceName, withExtension: masterKeyResourceExtension),
+              let keyFileData = try? Data(contentsOf: keyURL),
+              let keyBase64 = String(data: keyFileData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              let keyData = Data(base64Encoded: keyBase64) else {
+            return nil
+        }
+
+        return keyData
     }
 }
 
@@ -3862,15 +3944,17 @@ enum BenchmarkStorage {
             return []
         }
 
-        if let decoded = try? JSONDecoder().decode([BenchmarkResult].self, from: data) {
+        let decodedPayload = BencherCrypto.decryptStoragePayload(data) ?? data
+
+        if let decoded = try? JSONDecoder().decode([BenchmarkResult].self, from: decodedPayload) {
             let normalized = decoded.map { $0.normalizedDeviceNameIfNeeded() }
-            if normalized.map(\.deviceName) != decoded.map(\.deviceName) {
+            if normalized.map(\.deviceName) != decoded.map(\.deviceName) || decodedPayload == data {
                 save(normalized, to: backend)
             }
             return normalized.sorted(by: { $0.timestamp > $1.timestamp })
         }
 
-        if let legacyDecoded = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+        if let legacyDecoded = try? JSONSerialization.jsonObject(with: decodedPayload) as? [[String: Any]] {
             let mapped = legacyDecoded.compactMap { item -> BenchmarkResult? in
                 let id = (item["id"] as? String).flatMap(UUID.init(uuidString:)) ?? UUID()
                 let sessionID = (item["sessionID"] as? String).flatMap(UUID.init(uuidString:)) ?? UUID()
@@ -3922,7 +4006,7 @@ enum BenchmarkStorage {
                 )
             }
             let normalized = mapped.map { $0.normalizedDeviceNameIfNeeded() }
-            if normalized.map(\.deviceName) != mapped.map(\.deviceName) {
+            if normalized.map(\.deviceName) != mapped.map(\.deviceName) || decodedPayload == data {
                 save(normalized, to: backend)
             }
             return normalized.sorted(by: { $0.timestamp > $1.timestamp })
@@ -3934,11 +4018,12 @@ enum BenchmarkStorage {
     private static func save(_ scores: [BenchmarkResult], to backend: Backend) {
         let deduped = deduplicate(scores)
         guard let encoded = try? JSONEncoder().encode(deduped) else { return }
+        let storedData = BencherCrypto.encryptStoragePayload(encoded) ?? encoded
         switch backend {
         case .local:
-            UserDefaults.standard.set(encoded, forKey: localStorageKey)
+            UserDefaults.standard.set(storedData, forKey: localStorageKey)
         case .iCloud:
-            NSUbiquitousKeyValueStore.default.set(encoded, forKey: iCloudStorageKey)
+            NSUbiquitousKeyValueStore.default.set(storedData, forKey: iCloudStorageKey)
             _ = NSUbiquitousKeyValueStore.default.synchronize()
         }
     }
@@ -6016,17 +6101,27 @@ struct TrendsView: View {
 
 // MARK: - Settings View
 struct SettingsView: View {
+    let latestResult: BenchmarkResult?
     @AppStorage("benchmarkIntensity") private var intensity: String = "Balanced"
     @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 1
     @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "System"
     @AppStorage("preferredExportFormat") private var preferredExportFormat: String = "JSON"
     @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
     @AppStorage("graphicsBenchmarkBackend") private var graphicsBenchmarkBackend: String = GraphicsBenchmarkBackend.metal.rawValue
+    @State private var includeLatestBenchmarkInFeedback: Bool = false
+    @State private var feedbackMessage: String? = nil
+    @State private var isShowingFeedbackAlert: Bool = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
             settingsContent
             .navigationTitle("Settings")
+            .alert("Feedback", isPresented: $isShowingFeedbackAlert, actions: {
+                Button("OK", role: .cancel) { }
+            }, message: {
+                Text(feedbackMessage ?? "No message available.")
+            })
         }
     }
 
@@ -6145,6 +6240,13 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+
+                settingsSectionCard(
+                    title: "Feedback",
+                    description: "Send feedback by email with optional benchmark details so problems or ideas are easier to investigate."
+                ) {
+                    feedbackSectionContent
+                }
             }
             .frame(maxWidth: 760, alignment: .leading)
             .padding(.horizontal, 28)
@@ -6219,8 +6321,31 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            Section("Feedback") {
+                feedbackSectionContent
+            }
         }
         #endif
+    }
+
+    @ViewBuilder
+    private var feedbackSectionContent: some View {
+        Toggle("Include latest full benchmark result", isOn: $includeLatestBenchmarkInFeedback)
+            .disabled(latestResult == nil)
+
+        Text(latestResult == nil
+             ? "No saved benchmark result is available yet, so only the basic device and app details will be included."
+             : "If enabled, the latest saved benchmark result will be added beneath your message so it is easier to investigate issues.")
+            .font(.caption)
+            .foregroundColor(.secondary)
+
+        Button {
+            sendFeedback()
+        } label: {
+            Label("Send Feedback", systemImage: "envelope")
+        }
+        .buttonStyle(.borderedProminent)
     }
 
     @ViewBuilder
@@ -6248,6 +6373,111 @@ struct SettingsView: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func sendFeedback() {
+        guard let feedbackEmailAddress = BencherSupport.feedbackEmailAddress() else {
+            feedbackMessage = "Bencher could not load the local encrypted feedback address."
+            isShowingFeedbackAlert = true
+            return
+        }
+
+        guard let subject = feedbackSubject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let body = feedbackBody.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "mailto:\(feedbackEmailAddress)?subject=\(subject)&body=\(body)") else {
+            feedbackMessage = "Bencher could not create the feedback email."
+            isShowingFeedbackAlert = true
+            return
+        }
+
+        openURL(url)
+    }
+
+    private var feedbackSubject: String {
+        "Bencher Feedback (\(appVersionString))"
+    }
+
+    private var feedbackBody: String {
+        let header = """
+        Bencher Feedback
+
+        App Version: \(appVersionString)
+        Device: \(DeviceModel.currentDeviceName())
+        OS: \(operatingSystemVersionString)
+        Preferred Graphics Path: \(graphicsBenchmarkBackend)
+
+        Feedback:
+        - 
+        """
+
+        guard includeLatestBenchmarkInFeedback, let latestResult else {
+            return header
+        }
+
+        return """
+        \(header)
+
+        Latest Saved Benchmark Result
+        ----------------------------
+        Session ID: \(latestResult.sessionID.uuidString)
+        Device: \(latestResult.deviceName)
+        Recorded: \(latestResult.timestamp.formatted(date: .complete, time: .standard))
+        Benchmark Mode: \(latestResult.benchmarkIntensity)
+        Graphics Path: \(latestResult.graphicsBackend)
+        Pinned: \(latestResult.isPinned ? "Yes" : "No")
+        Thermal State: \(thermalStateText(latestResult.thermalState))
+        Power State: \(powerConnectionText(latestResult.wasConnectedToPower))
+        Single-Core: \(String(format: "%.0f", latestResult.singleCoreScore))
+        Multi-Core: \(String(format: "%.0f", latestResult.cpuScore))
+        Memory: \(String(format: "%.0f", latestResult.memoryScore))
+        Memory Raw Throughput: \(String(format: "%.0f", latestResult.memoryRawThroughputMBps)) MB/s
+        SSD: \(String(format: "%.0f", latestResult.ssdScore))
+        SSD Raw Combined: \(String(format: "%.0f", latestResult.ssdRawCombinedMBps)) MB/s
+        SSD Raw Read: \(String(format: "%.0f", latestResult.ssdRawReadMBps)) MB/s
+        SSD Raw Write: \(String(format: "%.0f", latestResult.ssdRawWriteMBps)) MB/s
+        Graphics: \(String(format: "%.0f", latestResult.graphicsScore))
+        Overall: \(String(format: "%.0f", latestResult.overallScore))
+        Performance Tier: \(latestResult.performanceTier)
+        Bottleneck: \(latestResult.bottleneck)
+        Notes: \(latestResult.note.isEmpty ? "None" : latestResult.note)
+        Tags: \(latestResult.tags.isEmpty ? "None" : latestResult.tags.joined(separator: ", "))
+        """
+    }
+
+    private var appVersionString: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
+        return "\(version) (\(build))"
+    }
+
+    private var operatingSystemVersionString: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        #if os(macOS)
+        return "macOS \(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+        #else
+        return "iOS \(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+        #endif
+    }
+
+    private func thermalStateText(_ state: Int) -> String {
+        switch state {
+        case 0: return "Nominal"
+        case 1: return "Fair"
+        case 2: return "Serious"
+        case 3: return "Critical"
+        default: return "Unknown"
+        }
+    }
+
+    private func powerConnectionText(_ isConnected: Bool?) -> String {
+        switch isConnected {
+        case true:
+            return "On AC Power"
+        case false:
+            return "Not on AC Power"
+        default:
+            return "Unknown"
+        }
     }
 }
 
@@ -6768,9 +6998,19 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.98",
+            title: "Safer Storage & Feedback",
+            releaseDate: "Current Build",
+            changes: [
+                "Moved the feedback contact details out of the main app code and tightened up how that information is handled behind the scenes.",
+                "Added stronger protection for saved benchmark history so your results are stored more securely while still syncing and loading as expected.",
+                "Smoothed out the app's read and write flow so older saved data keeps working properly after the security changes."
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.97",
             title: "Cleaner Steel & Comparisons",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Tidied up the benchmark warnings so older graphics runs are explained more clearly without cluttering normal result viewing.",
                 "Fixed the Mac compare and reference pickers so they open at a sensible height and actually show the full list of saved runs.",
