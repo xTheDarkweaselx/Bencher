@@ -481,8 +481,8 @@ struct BenchmarkView: View {
             }
 
             HStack(spacing: 10) {
-                benchmarkInfoChip(title: benchmarkIntensity, systemImage: "dial.medium")
-                benchmarkInfoChip(title: "\(benchmarkRepeatCount)x stability", systemImage: "repeat")
+                benchmarkIntensityMenuChip
+                benchmarkStabilityMenuChip
                 benchmarkInfoChip(title: benchmarkComplete ? "Ready" : (isRunning ? "In Progress" : "Idle"), systemImage: isRunning ? "waveform.path.ecg" : "checkmark.circle")
             }
         }
@@ -597,6 +597,52 @@ struct BenchmarkView: View {
         .padding(.vertical, 8)
         .background(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06))
         .clipShape(Capsule())
+    }
+
+    private var benchmarkIntensityMenuChip: some View {
+        Menu {
+            ForEach(["Light", "Balanced", "Extreme"], id: \.self) { intensity in
+                Button {
+                    benchmarkIntensity = intensity
+                } label: {
+                    benchmarkMenuLabel(title: intensity, isSelected: benchmarkIntensity == intensity)
+                }
+            }
+        } label: {
+            benchmarkInfoChip(title: benchmarkIntensity, systemImage: "dial.medium")
+        }
+        .buttonStyle(.plain)
+        .disabled(isRunning)
+    }
+
+    private var benchmarkStabilityMenuChip: some View {
+        Menu {
+            ForEach([1, 3, 5], id: \.self) { runCount in
+                Button {
+                    benchmarkRepeatCount = runCount
+                } label: {
+                    benchmarkMenuLabel(
+                        title: "\(runCount)x stability",
+                        isSelected: benchmarkRepeatCount == runCount
+                    )
+                }
+            }
+        } label: {
+            benchmarkInfoChip(title: "\(benchmarkRepeatCount)x stability", systemImage: "repeat")
+        }
+        .buttonStyle(.plain)
+        .disabled(isRunning)
+    }
+
+    @ViewBuilder
+    private func benchmarkMenuLabel(title: String, isSelected: Bool) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            if isSelected {
+                Image(systemName: "checkmark")
+            }
+        }
     }
 
     private func benchmarkNotice(_ text: String, tint: Color, systemImage: String) -> some View {
@@ -1011,6 +1057,7 @@ struct HistoryView: View {
     @State private var selectedBenchmarkHistoryFilter: String = "All Intensities"
     @State private var selectedThermalHistoryFilter: String = "All Thermal States"
     @State private var selectedPowerHistoryFilter: String = "All Power States"
+    @State private var selectedGraphicsHistoryFilter: String = "All Graphics Paths"
     @State private var favouritesOnly: Bool = false
     @State private var historyFilterScrollIndex: Int = 0
     @State private var isShowingDeleteAllConfirmation: Bool = false
@@ -1047,9 +1094,10 @@ struct HistoryView: View {
             let matchesBenchmark = selectedBenchmarkHistoryFilter == "All Intensities" || result.benchmarkIntensity == selectedBenchmarkHistoryFilter
             let matchesThermal = selectedThermalHistoryFilter == "All Thermal States" || thermalStateText(result.thermalState) == selectedThermalHistoryFilter
             let matchesPower = selectedPowerHistoryFilter == "All Power States" || powerConnectionText(result.wasConnectedToPower) == selectedPowerHistoryFilter
+            let matchesGraphics = selectedGraphicsHistoryFilter == "All Graphics Paths" || result.graphicsBackend == selectedGraphicsHistoryFilter
             let matchesFavourite = !favouritesOnly || result.isPinned
 
-            return matchesSearch && matchesDevice && matchesBenchmark && matchesThermal && matchesPower && matchesFavourite
+            return matchesSearch && matchesDevice && matchesBenchmark && matchesThermal && matchesPower && matchesGraphics && matchesFavourite
         }
     }
 
@@ -1069,17 +1117,17 @@ struct HistoryView: View {
         ["All Power States", "On AC Power", "Not on AC Power", "Unknown"]
     }
 
+    private var historyGraphicsFilters: [String] {
+        ["All Graphics Paths"] + Array(Set(scores.map(\.graphicsBackend))).sorted()
+    }
+
     private var selectedResult: BenchmarkResult? {
         guard let selectedResultID else { return filteredSortedScores.first }
         return filteredSortedScores.first(where: { $0.id == selectedResultID }) ?? filteredSortedScores.first
     }
     
     private func comparisonBase(for result: BenchmarkResult) -> BenchmarkResult? {
-        let sorted = scores.sorted(by: { $0.timestamp < $1.timestamp })
-        guard let index = sorted.firstIndex(where: { $0.id == result.id }), index > 0 else {
-            return nil
-        }
-        return sorted[index - 1]
+        comparableBenchmarkBaseline(for: result, within: scores)
     }
 
     var body: some View {
@@ -1229,6 +1277,9 @@ struct HistoryView: View {
                         }
                     }
                 )
+                #if os(macOS)
+                .frame(minWidth: 640, minHeight: 720)
+                #endif
             }
             .bencherItemCover(item: $compactComparisonSession) { session in
                 NavigationStack {
@@ -1632,6 +1683,19 @@ struct HistoryView: View {
             }
             .id(HistoryFilterChipID.power)
 
+            Menu {
+                ForEach(historyGraphicsFilters, id: \.self) { backend in
+                    Button {
+                        selectedGraphicsHistoryFilter = backend
+                    } label: {
+                        historyMenuLabel(title: backend, isSelected: selectedGraphicsHistoryFilter == backend)
+                    }
+                }
+            } label: {
+                filterChip(title: selectedGraphicsHistoryFilter, systemImage: "display")
+            }
+            .id(HistoryFilterChipID.graphics)
+
             Button {
                 favouritesOnly.toggle()
             } label: {
@@ -1844,6 +1908,7 @@ struct HistoryView: View {
         selectedBenchmarkHistoryFilter = "All Intensities"
         selectedThermalHistoryFilter = "All Thermal States"
         selectedPowerHistoryFilter = "All Power States"
+        selectedGraphicsHistoryFilter = "All Graphics Paths"
         favouritesOnly = false
 
         guard let matched = scores.first(where: { $0.id == id }) else { return }
@@ -2336,6 +2401,10 @@ struct DetailedResultView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.orange)
                 }
+
+                if let comparisonWarningText {
+                    benchmarkComparisonNotice(comparisonWarningText)
+                }
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2499,6 +2568,10 @@ struct DetailedResultView: View {
         Power State: \(powerConnectionText(result.wasConnectedToPower))
         """
     }
+
+    private var comparisonWarningText: String? {
+        benchmarkComparisonWarning(primary: result, secondary: comparisonBase)
+    }
     
     @ViewBuilder
     private func detailStatusChip(title: String, systemImage: String, tint: Color) -> some View {
@@ -2525,6 +2598,24 @@ struct DetailedResultView: View {
             .padding(.vertical, 6)
             .background(Color.primary.opacity(0.08))
             .clipShape(Capsule())
+    }
+
+    private func benchmarkComparisonNotice(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+            Text(text)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.primary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.orange.opacity(0.22), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
     
     private var tierColor: Color {
@@ -3049,6 +3140,48 @@ enum GraphicsBenchmarkBackend: String, Identifiable, Codable {
     }
 }
 
+private let preferredReferenceBenchmarkIntensity = "Balanced"
+
+private func usesPreferredComparisonParameters(_ result: BenchmarkResult) -> Bool {
+    result.benchmarkIntensity == preferredReferenceBenchmarkIntensity
+    && result.graphicsBackend == GraphicsBenchmarkBackend.metal.rawValue
+}
+
+private func comparableBenchmarkBaseline(for result: BenchmarkResult, within scores: [BenchmarkResult]) -> BenchmarkResult? {
+    scores
+        .filter {
+            $0.id != result.id
+            && $0.timestamp < result.timestamp
+            && $0.deviceName == result.deviceName
+            && $0.benchmarkIntensity == result.benchmarkIntensity
+            && $0.graphicsBackend == result.graphicsBackend
+        }
+        .sorted(by: { $0.timestamp > $1.timestamp })
+        .first
+}
+
+private func benchmarkComparisonWarning(primary: BenchmarkResult, secondary: BenchmarkResult? = nil) -> String? {
+    if let secondary {
+        let hasDifferentSetup = primary.benchmarkIntensity != secondary.benchmarkIntensity
+            || primary.graphicsBackend != secondary.graphicsBackend
+
+        if hasDifferentSetup {
+            return "These two runs were recorded with different benchmark settings, so this is better treated as a rough comparison than a like-for-like one."
+        }
+        let usesPreferredSetup = usesPreferredComparisonParameters(primary)
+            && usesPreferredComparisonParameters(secondary)
+        guard !usesPreferredSetup else { return nil }
+        return "This comparison includes a run that was captured outside Bencher's usual setup. Balanced mode with Metal gives the fairest side-by-side match."
+    }
+
+    guard primary.graphicsBackend == GraphicsBenchmarkBackend.legacy.rawValue else { return nil }
+    return "This run used Bencher's older graphics path, so its graphics result may not line up as neatly with newer runs."
+}
+
+private func benchmarkBackendFilterTitle(_ backend: String) -> String {
+    backend == "All Graphics Paths" ? backend : backend
+}
+
 class Benchmark {
     private let cpuTaskIterations: Int
         private let largeArraySize: Int
@@ -3230,16 +3363,18 @@ class Benchmark {
                 return metalScore
             }
             #endif
-        }
-
-        #if os(macOS)
-        if preferredGraphicsBackend == .openCL || preferredGraphicsBackend == .metal {
+            lastGraphicsBackendUsed = .metal
+            return 0
+        } else if preferredGraphicsBackend == .openCL {
+            #if os(macOS)
             if let openCLScore = measureOpenCLGraphicsRendering() {
                 lastGraphicsBackendUsed = .openCL
                 return openCLScore
             }
+            #endif
+            lastGraphicsBackendUsed = .openCL
+            return 0
         }
-        #endif
 
         lastGraphicsBackendUsed = .legacy
 
@@ -3378,36 +3513,8 @@ class Benchmark {
     }
 
     private func makeMetalGraphicsPipeline(device: MTLDevice) -> MTLComputePipelineState? {
-        let source = """
-        #include <metal_stdlib>
-        using namespace metal;
-
-        kernel void bencherGraphics(
-            device float4 *output [[buffer(0)]],
-            constant uint &iterations [[buffer(1)]],
-            constant uint &seed [[buffer(2)]],
-            uint gid [[thread_position_in_grid]]
-        ) {
-            float4 value = float4(
-                float(gid) * 0.000031f + float(seed) * 0.013f,
-                float(gid) * 0.000047f + 0.11f,
-                float(gid) * 0.000059f + 0.23f,
-                float(gid) * 0.000071f + 0.37f
-            );
-
-            for (uint i = 0; i < iterations; ++i) {
-                float4 rotated = value.yzwx;
-                value = native_sin(value * 1.017f + rotated * 0.913f + 0.07f);
-                value += native_cos(rotated * 1.031f + float(i) * 0.00091f + 0.13f);
-                value = native_sqrt(fabs(value) + 0.0001f);
-            }
-
-            output[gid] = value;
-        }
-        """
-
         do {
-            let library = try device.makeLibrary(source: source, options: nil)
+            let library = try device.makeDefaultLibrary(bundle: .main)
             guard let function = library.makeFunction(name: "bencherGraphics") else {
                 return nil
             }
@@ -4148,6 +4255,7 @@ private enum HistoryFilterChipID: CaseIterable {
     case intensity
     case thermal
     case power
+    case graphics
     case favourites
 }
 
@@ -4625,6 +4733,11 @@ struct CompareResultsView: View {
         return "\(winnerName) leads in \(winnerCount) of 6 main categories."
     }
 
+    private var comparisonWarningText: String? {
+        guard let left, let right else { return nil }
+        return benchmarkComparisonWarning(primary: left, secondary: right)
+    }
+
     private func displayName(for result: BenchmarkResult) -> String {
         guard results.count == 2 else { return result.deviceName }
         if result.id == results[0].id {
@@ -4679,6 +4792,20 @@ struct CompareResultsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(BencherTheme.cardGradient)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
+
+                if let comparisonWarningText {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text(comparisonWarningText)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.primary)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
 
                 if let onClose {
@@ -5027,6 +5154,7 @@ struct TrendsView: View {
     @Binding var pendingHistorySelection: BenchmarkResult.ID?
     @State private var selectedDeviceFilter: String = "All Devices"
     @State private var selectedBenchmarkFilter: String = "Balanced"
+    @State private var selectedGraphicsBackendFilter: String = GraphicsBenchmarkBackend.metal.rawValue
     @State private var selectedTimeRange: TrendTimeRange = .allTime
     @State private var selectedTrendDate: Date? = nil
     
@@ -5078,7 +5206,8 @@ struct TrendsView: View {
         scores.filter { result in
             let matchesDevice = selectedDeviceFilter == "All Devices" || result.deviceName == selectedDeviceFilter
             let matchesBenchmark = selectedBenchmarkFilter == "All Types" || result.benchmarkIntensity == selectedBenchmarkFilter
-            return matchesDevice && matchesBenchmark
+            let matchesGraphicsBackend = selectedGraphicsBackendFilter == "All Graphics Paths" || result.graphicsBackend == selectedGraphicsBackendFilter
+            return matchesDevice && matchesBenchmark && matchesGraphicsBackend
         }
     }
     private var chronologicalScores: [BenchmarkResult] {
@@ -5091,9 +5220,7 @@ struct TrendsView: View {
     }
 
     private var graphicsChronologicalScores: [BenchmarkResult] {
-        let sorted = baseFilteredScores
-            .filter { $0.graphicsBackend == GraphicsBenchmarkBackend.metal.rawValue }
-            .sorted(by: { $0.timestamp < $1.timestamp })
+        let sorted = baseFilteredScores.sorted(by: { $0.timestamp < $1.timestamp })
         guard let latestDate = sorted.last?.timestamp,
               let startDate = startDate(for: latestDate) else {
             return sorted
@@ -5136,6 +5263,10 @@ struct TrendsView: View {
     
     private var availableBenchmarkTypes: [String] {
         ["Balanced", "Light", "Extreme", "All Types"]
+    }
+
+    private var availableGraphicsBackends: [String] {
+        ["All Graphics Paths"] + Array(Set(scores.map(\.graphicsBackend))).sorted()
     }
 
     private var latest: DailyTrendPoint? {
@@ -5202,14 +5333,17 @@ struct TrendsView: View {
     private var emptyTrendMessage: String {
         let rangeSuffix = selectedTimeRange == .allTime ? "" : " in the selected time range"
 
-        if selectedDeviceFilter != "All Devices" && selectedBenchmarkFilter != "All Types" {
-            return "No data available yet for \(selectedDeviceFilter) using \(selectedBenchmarkFilter) benchmarks\(rangeSuffix)."
+        if selectedDeviceFilter != "All Devices" && selectedBenchmarkFilter != "All Types" && selectedGraphicsBackendFilter != "All Graphics Paths" {
+            return "No data available yet for \(selectedDeviceFilter) using \(selectedBenchmarkFilter) benchmarks on the \(selectedGraphicsBackendFilter) graphics path\(rangeSuffix)."
         }
         if selectedDeviceFilter != "All Devices" {
             return "No data available yet for \(selectedDeviceFilter)\(rangeSuffix)."
         }
         if selectedBenchmarkFilter != "All Types" {
             return "No data available yet for \(selectedBenchmarkFilter) benchmarks\(rangeSuffix)."
+        }
+        if selectedGraphicsBackendFilter != "All Graphics Paths" {
+            return "No data available yet for the \(selectedGraphicsBackendFilter) graphics path\(rangeSuffix)."
         }
         if selectedTimeRange != .allTime {
             return "No data available yet in the selected time range."
@@ -5267,9 +5401,22 @@ struct TrendsView: View {
                         trendsFilterButton(title: selectedBenchmarkFilter, systemImage: "dial.medium")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Menu {
+                        ForEach(availableGraphicsBackends, id: \.self) { backend in
+                            Button {
+                                selectedGraphicsBackendFilter = backend
+                            } label: {
+                                trendsMenuLabel(title: backend, isSelected: selectedGraphicsBackendFilter == backend)
+                            }
+                        }
+                    } label: {
+                        trendsFilterButton(title: selectedGraphicsBackendFilter, systemImage: "display")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                Text("Switch between device types and benchmark types so trend data stays comparable and is not muddied by mixed benchmark workloads.")
+                Text("Switch between device types, benchmark types and graphics paths so trend data stays comparable and is not muddied by mixed benchmark setups.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -5444,7 +5591,7 @@ struct TrendsView: View {
 
             if chartPoints.isEmpty {
                 Text(keyPath == \.graphicsScore
-                     ? "No Metal graphics runs match the current filters yet."
+                     ? "No graphics runs match the current filters yet."
                      : "No trend data matches the current filters yet.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -6306,6 +6453,10 @@ struct ReferenceDevicesView: View {
                         if let selectedResult {
                             selectedResultSummary(selectedResult)
 
+                            if let warningText = referenceWarningText(for: selectedResult) {
+                                referenceWarningCard(text: warningText)
+                            }
+
                             ForEach(referenceSections) { section in
                                 referenceSectionCard(section, selectedResult: selectedResult)
                             }
@@ -6381,6 +6532,9 @@ struct ReferenceDevicesView: View {
                         }
                     }
                 }
+                #if os(macOS)
+                .frame(minWidth: 640, minHeight: 720)
+                #endif
             }
         }
     }
@@ -6465,6 +6619,7 @@ struct ReferenceDevicesView: View {
                 VStack(alignment: .trailing, spacing: 8) {
                     referenceChip(result.deviceName, tint: .blue)
                     referenceChip(result.benchmarkIntensity, tint: .green)
+                    referenceChip(result.graphicsBackend, tint: .pink)
                 }
             }
 
@@ -6480,6 +6635,28 @@ struct ReferenceDevicesView: View {
                 .stroke(Color.primary.opacity(0.05), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func referenceWarningText(for result: BenchmarkResult) -> String? {
+        benchmarkComparisonWarning(primary: result)
+    }
+
+    private func referenceWarningCard(text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+            Text(text)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.primary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
     private func referenceSectionCard(_ section: ReferenceSection, selectedResult: BenchmarkResult) -> some View {
@@ -6591,9 +6768,19 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.97",
+            title: "Cleaner Steel & Comparisons",
+            releaseDate: "Current Build",
+            changes: [
+                "Tidied up the benchmark warnings so older graphics runs are explained more clearly without cluttering normal result viewing.",
+                "Fixed the Mac compare and reference pickers so they open at a sensible height and actually show the full list of saved runs.",
+                "Kept refining comparison tools across History, Reference and Trends so matching runs are easier to line up properly."
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.96",
             title: "Balls of Steel",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Reworked the graphics benchmark so it leans more on actual GPU compute work instead of simpler copy-heavy behaviour.",
                 "Improved the Metal test path to make graphics runs more dependable and less likely to fall back unexpectedly.",
@@ -6633,7 +6820,7 @@ struct UpdatesView: View {
         AppUpdateEntry(
             version: "V0.92",
             title: "Cloudy Skies with a Chance of Mac",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Added App Sandbox Support to allow for test builds of Bencher for MacOS.",
                 "Changed project permission settings of Bencher.",
@@ -7280,23 +7467,22 @@ struct DashboardView: View {
         scores.sorted(by: { $0.timestamp > $1.timestamp }).first
     }
 
-    private var previousResult: BenchmarkResult? {
-        let sorted = scores.sorted(by: { $0.timestamp > $1.timestamp })
-        guard sorted.count > 1 else { return nil }
-        return sorted[1]
+    private var previousComparableResult: BenchmarkResult? {
+        guard let latestResult else { return nil }
+        return comparableBenchmarkBaseline(for: latestResult, within: scores)
     }
 
     private var trendSummary: String {
         guard let latest = latestResult else {
             return "No benchmark history yet. Run your first benchmark to start building a profile."
         }
-        guard let previous = previousResult else {
-            return "This is your first saved benchmark. Run another to start seeing trend movement."
+        guard let previous = previousComparableResult else {
+            return "No comparable recent trend to show here yet."
         }
 
         let delta = latest.overallScore - previous.overallScore
         let sign = delta >= 0 ? "+" : ""
-        return "Latest overall score is \(sign)\(String(format: "%.0f", delta)) compared with the previous saved run."
+        return "Latest overall score is \(sign)\(String(format: "%.0f", delta)) compared with the most recent run from the same device, benchmark mode and graphics path."
     }
 
     var body: some View {
@@ -7324,6 +7510,10 @@ struct DashboardView: View {
                                 .foregroundColor(.secondary)
 
                             Text("Benchmark type: \(latestResult.benchmarkIntensity)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.secondary)
+
+                            Text("Graphics path: \(latestResult.graphicsBackend)")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundColor(.secondary)
 
