@@ -1,0 +1,19 @@
+Déclaration d'Utilisation de Techniques de Chiffrement
+
+Nom de l'application : Bencher
+Version de l'application : 0.98
+
+Description de l'application :
+Bencher est une application de benchmark pour appareils Apple. Elle mesure les performances CPU, mémoire, stockage et graphiques, enregistre l'historique des résultats localement, propose une synchronisation iCloud en option et permet l'envoi volontaire de retours par e-mail.
+
+Techniques de chiffrement utilisées :
+Bencher utilise des algorithmes de chiffrement standard reconnus internationalement, notamment AES-GCM et HKDF-SHA256, via le framework CryptoKit d'Apple.
+
+Utilisation des algorithmes de chiffrement :
+- Algorithmes de chiffrement standard au lieu de, ou en plus de, l'utilisation ou l'accès au chiffrement au sein du système d'exploitation Apple.
+
+Détails de l'implémentation :
+L'application utilise CryptoKit pour protéger certaines données internes de l'application, notamment des données de configuration et des données d'historique enregistrées localement ou synchronisées via iCloud. Aucun algorithme propriétaire de chiffrement n'est utilisé.
+
+Déclaration :
+Je soussigné, <nom du représentant légal>, en tant que représentant légal de Bencher, déclare que toutes les informations fournies dans ce formulaire sont exactes et complètes.

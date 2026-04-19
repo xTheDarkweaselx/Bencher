@@ -5237,6 +5237,8 @@ struct TrendsView: View {
     let scores: [BenchmarkResult]
     @Binding var selectedTab: String
     @Binding var pendingHistorySelection: BenchmarkResult.ID?
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var selectedDeviceFilter: String = "All Devices"
     @State private var selectedBenchmarkFilter: String = "Balanced"
     @State private var selectedGraphicsBackendFilter: String = GraphicsBenchmarkBackend.metal.rawValue
@@ -5354,6 +5356,14 @@ struct TrendsView: View {
         ["All Graphics Paths"] + Array(Set(scores.map(\.graphicsBackend))).sorted()
     }
 
+    private var usesPortraitTrendsFilterLayout: Bool {
+#if os(iOS)
+        horizontalSizeClass == .compact && verticalSizeClass == .regular
+#else
+        false
+#endif
+    }
+
     private var latest: DailyTrendPoint? {
         dailyTrendPoints.last
     }
@@ -5460,45 +5470,16 @@ struct TrendsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 trendsFilterLabel("Comparison Filters")
 
-                HStack(spacing: 12) {
-                    Menu {
-                        ForEach(availableDevices, id: \.self) { device in
-                            Button {
-                                selectedDeviceFilter = device
-                            } label: {
-                                trendsMenuLabel(title: device, isSelected: selectedDeviceFilter == device)
-                            }
+                Group {
+                    if usesPortraitTrendsFilterLayout {
+                        VStack(spacing: 12) {
+                            trendsComparisonFilterMenus
                         }
-                    } label: {
-                        trendsFilterButton(title: selectedDeviceFilter, systemImage: "iphone")
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Menu {
-                        ForEach(availableBenchmarkTypes, id: \.self) { type in
-                            Button {
-                                selectedBenchmarkFilter = type
-                            } label: {
-                                trendsMenuLabel(title: type, isSelected: selectedBenchmarkFilter == type)
-                            }
+                    } else {
+                        HStack(spacing: 12) {
+                            trendsComparisonFilterMenus
                         }
-                    } label: {
-                        trendsFilterButton(title: selectedBenchmarkFilter, systemImage: "dial.medium")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Menu {
-                        ForEach(availableGraphicsBackends, id: \.self) { backend in
-                            Button {
-                                selectedGraphicsBackendFilter = backend
-                            } label: {
-                                trendsMenuLabel(title: backend, isSelected: selectedGraphicsBackendFilter == backend)
-                            }
-                        }
-                    } label: {
-                        trendsFilterButton(title: selectedGraphicsBackendFilter, systemImage: "display")
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 Text("Switch between device types, benchmark types and graphics paths so trend data stays comparable and is not muddied by mixed benchmark setups.")
@@ -5858,6 +5839,48 @@ struct TrendsView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundColor(.primary)
         }
+    }
+
+    @ViewBuilder
+    private var trendsComparisonFilterMenus: some View {
+        Menu {
+            ForEach(availableDevices, id: \.self) { device in
+                Button {
+                    selectedDeviceFilter = device
+                } label: {
+                    trendsMenuLabel(title: device, isSelected: selectedDeviceFilter == device)
+                }
+            }
+        } label: {
+            trendsFilterButton(title: selectedDeviceFilter, systemImage: "iphone")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        Menu {
+            ForEach(availableBenchmarkTypes, id: \.self) { type in
+                Button {
+                    selectedBenchmarkFilter = type
+                } label: {
+                    trendsMenuLabel(title: type, isSelected: selectedBenchmarkFilter == type)
+                }
+            }
+        } label: {
+            trendsFilterButton(title: selectedBenchmarkFilter, systemImage: "dial.medium")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        Menu {
+            ForEach(availableGraphicsBackends, id: \.self) { backend in
+                Button {
+                    selectedGraphicsBackendFilter = backend
+                } label: {
+                    trendsMenuLabel(title: backend, isSelected: selectedGraphicsBackendFilter == backend)
+                }
+            }
+        } label: {
+            trendsFilterButton(title: selectedGraphicsBackendFilter, systemImage: "display")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func trendsFilterButton(title: String, systemImage: String) -> some View {
@@ -6998,9 +7021,19 @@ private struct ReferenceEntry: Identifiable {
 struct UpdatesView: View {
     private let updates: [AppUpdateEntry] = [
         AppUpdateEntry(
+            version: "V0.99",
+            title: "Cleaner Trends on iPhone",
+            releaseDate: "Current Build",
+            changes: [
+                "Tidied up the Trends filters on iPhone so the labels no longer get awkwardly cut off in portrait mode.",
+                "Reworked that filter area to stack more naturally when space is tight, while keeping the wider layout unchanged elsewhere.",
+                "Left iPad, landscape iPhone and Mac layouts alone so the fix only affects the cramped portrait setup."
+            ]
+        ),
+        AppUpdateEntry(
             version: "V0.98",
             title: "Safer Storage & Feedback",
-            releaseDate: "Current Build",
+            releaseDate: "Previous Build",
             changes: [
                 "Moved the feedback contact details out of the main app code and tightened up how that information is handled behind the scenes.",
                 "Added stronger protection for saved benchmark history so your results are stored more securely while still syncing and loading as expected.",
