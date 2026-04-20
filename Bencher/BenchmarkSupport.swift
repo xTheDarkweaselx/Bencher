@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Metal)
+import Metal
+#endif
 
 enum BenchmarkMetricKind: String, Codable, CaseIterable {
     case singleCore
@@ -155,3 +158,75 @@ enum BenchmarkValidator {
         return BenchmarkValidationSummary(reliability: reliability, messages: messages)
     }
 }
+
+#if canImport(Metal)
+enum BencherGraphicsRuntime {
+    private static let availabilityKey = "bencher.graphics.metal.available"
+    private static let lastCheckedKey = "bencher.graphics.metal.lastChecked"
+
+    static let shaderSource = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    kernel void bencherGraphics(
+        device float4 *output [[buffer(0)]],
+        constant uint &iterationCount [[buffer(1)]],
+        constant uint &seed [[buffer(2)]],
+        uint gid [[thread_position_in_grid]]
+    ) {
+        float base = float(gid + 1) * 0.00003125f + float(seed) * 0.013f;
+        float4 value = float4(base, base * 1.31f, base * 1.73f, base * 2.11f);
+
+        for (uint iteration = 0; iteration < iterationCount; ++iteration) {
+            float4 mixValue = float4(0.71f, 1.13f, 1.57f, 1.91f) + float4(iteration) * 0.00017f;
+            value = sin(value * mixValue + float4(0.17f, 0.29f, 0.37f, 0.43f));
+            value += cos(value.yzwx * 0.73f + float4(iteration) * 0.00011f);
+            value = sqrt(fabs(value) + float4(0.0001f));
+        }
+
+        output[gid] = value;
+    }
+    """
+
+    static var recordedAvailability: Bool? {
+        guard UserDefaults.standard.object(forKey: availabilityKey) != nil else { return nil }
+        return UserDefaults.standard.bool(forKey: availabilityKey)
+    }
+
+    static var lastCheckedDate: Date? {
+        UserDefaults.standard.object(forKey: lastCheckedKey) as? Date
+    }
+
+    static func performStartupSelfCheck() {
+        DispatchQueue.global(qos: .utility).async {
+            let available = compileSelfCheck()
+            recordAvailability(available)
+        }
+    }
+
+    static func recordAvailability(_ available: Bool) {
+        UserDefaults.standard.set(available, forKey: availabilityKey)
+        UserDefaults.standard.set(Date(), forKey: lastCheckedKey)
+    }
+
+    private static func compileSelfCheck() -> Bool {
+        guard let device = preferredMetalDevice() else { return false }
+
+        do {
+            let library = try device.makeLibrary(source: shaderSource, options: nil)
+            return library.makeFunction(name: "bencherGraphics") != nil
+        } catch {
+            return false
+        }
+    }
+
+    private static func preferredMetalDevice() -> MTLDevice? {
+        #if os(macOS)
+        let devices = MTLCopyAllDevices()
+        return devices.first(where: { !$0.isRemovable }) ?? devices.first ?? MTLCreateSystemDefaultDevice()
+        #else
+        return MTLCreateSystemDefaultDevice()
+        #endif
+    }
+}
+#endif

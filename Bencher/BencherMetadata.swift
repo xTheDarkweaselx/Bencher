@@ -16,9 +16,19 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
+        version: "V1.02",
+        title: "Graphics Path Safety Pass",
+        releaseDate: "Current Build",
+        changes: [
+            "Reworked the Metal graphics test so it no longer depends on a separate shader build step, which helps avoid cloud build issues on Mac.",
+            "Added a startup graphics self-check so Bencher can confirm the Metal shader path is ready before you rely on it.",
+            "Kept the graphics benchmark tied to the same checked shader source, so reliability improvements do not weaken the actual GPU test."
+        ]
+    ),
+    AppUpdateEntry(
         version: "V1.01",
         title: "Updates, Right Where You Need Them More",
-        releaseDate: "Current Build",
+        releaseDate: "Previous Build",
         changes: [
             "Adjusted the updates flow so the release notes move into Settings only on iPhone, while iPad keeps its separate Updates tab.",
             "Kept the popup-style updates browser for iPhone, so checking what changed still feels quick and tidy.",

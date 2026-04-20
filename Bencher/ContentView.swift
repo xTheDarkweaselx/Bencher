@@ -61,6 +61,9 @@ struct ContentView: View {
         .onAppear {
             guard !hasPreparedStorage else { return }
             BenchmarkStorage.prepareForLaunch()
+            #if canImport(Metal)
+            BencherGraphicsRuntime.performStartupSelfCheck()
+            #endif
             scores = BenchmarkStorage.load()
             hasPreparedStorage = true
         }
@@ -121,6 +124,9 @@ struct ContentView: View {
         .onAppear {
             guard !hasPreparedStorage else { return }
             BenchmarkStorage.prepareForLaunch()
+            #if canImport(Metal)
+            BencherGraphicsRuntime.performStartupSelfCheck()
+            #endif
             scores = BenchmarkStorage.load()
             hasPreparedStorage = true
         }
@@ -3705,12 +3711,16 @@ class Benchmark {
 
     private func makeMetalGraphicsPipeline(device: MTLDevice) -> MTLComputePipelineState? {
         do {
-            let library = try device.makeDefaultLibrary(bundle: .main)
+            let library = try device.makeLibrary(source: BencherGraphicsRuntime.shaderSource, options: nil)
             guard let function = library.makeFunction(name: "bencherGraphics") else {
+                BencherGraphicsRuntime.recordAvailability(false)
                 return nil
             }
-            return try device.makeComputePipelineState(function: function)
+            let pipeline = try device.makeComputePipelineState(function: function)
+            BencherGraphicsRuntime.recordAvailability(true)
+            return pipeline
         } catch {
+            BencherGraphicsRuntime.recordAvailability(false)
             return nil
         }
     }
