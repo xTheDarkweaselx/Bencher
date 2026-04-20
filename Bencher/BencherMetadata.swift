@@ -16,9 +16,19 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
+        version: "V1.01",
+        title: "Updates, Right Where You Need Them More",
+        releaseDate: "Current Build",
+        changes: [
+            "Adjusted the updates flow so the release notes move into Settings only on iPhone, while iPad keeps its separate Updates tab.",
+            "Kept the popup-style updates browser for iPhone, so checking what changed still feels quick and tidy.",
+            "Fixed the Send Feedback button on iPhone and iPad so the envelope icon shows properly again."
+        ]
+    ),
+    AppUpdateEntry(
         version: "V1.0",
         title: "Updates, Right Where You Need Them",
-        releaseDate: "Current Build",
+        releaseDate: "Previous Build",
         changes: [
             "Moved release notes into Settings on iPhone and iPad, so they are easier to find without taking up a full tab.",
             "Added a popup-style updates browser on iOS, giving release notes a cleaner in-app home that feels more natural for quick check-ins.",
