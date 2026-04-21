@@ -135,8 +135,28 @@ struct BencherTests {
     @Test
     func releaseNotesExposeCurrentBuildEntry() async throws {
         #expect(BencherReleaseNotesEntries.isEmpty == false)
-        #expect(BencherReleaseNotesEntries.first?.version == "V0.99")
+        #expect(BencherReleaseNotesEntries.first?.version == "V1.10")
         #expect(BencherReleaseNotesEntries.filter { $0.releaseDate == "Current Build" }.count == 1)
+    }
+
+    @Test
+    func updateSearchFindsVersionsAndDetails() async throws {
+        let versionMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "1.10")
+        let feedbackMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "feedback icon")
+        let graphicsMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "mac cloud graphics")
+
+        #expect(versionMatches.first?.version == "V1.10")
+        #expect(feedbackMatches.contains { $0.version == "V1.01" })
+        #expect(graphicsMatches.first?.version == "V1.02")
+    }
+
+    @Test
+    func updateSearchRequiresAllTypedKeywords() async throws {
+        let matches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "iphone portrait filters")
+        let unrelatedMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "iphone opencl encryption")
+
+        #expect(matches.first?.version == "V0.99")
+        #expect(unrelatedMatches.isEmpty)
     }
 
     private func makeResult(

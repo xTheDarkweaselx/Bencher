@@ -16,9 +16,21 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
+        version: "V1.10",
+        title: "Cleaner Benchmarking & Controls",
+        releaseDate: "Current Build",
+        changes: [
+            "Cleaned up the Benchmark screen action buttons so the run, running and cancel controls no longer show awkward extra padding around the corners.",
+            "Kept the same clear button colors while removing the default button treatment that could make the controls look boxed in.",
+            "Polished the benchmark control area so it fits more naturally with the rest of the screen.",
+            "Improved update search on iPad, Mac and iPhone so you can find a version, feature or fix without guessing the exact wording.",
+            "Added clearer search feedback in Updates, including match counts and a friendlier empty state when nothing turns up."
+        ]
+    ),
+    AppUpdateEntry(
         version: "V1.02",
         title: "Graphics Path Safety Pass",
-        releaseDate: "Current Build",
+        releaseDate: "Previous Build",
         changes: [
             "Reworked the Metal graphics test so it no longer depends on a separate shader build step, which helps avoid cloud build issues on Mac.",
             "Added a startup graphics self-check so Bencher can confirm the Metal shader path is ready before you rely on it.",
@@ -48,7 +60,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.99",
         title: "Cleaner Trends on iPhone",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Tidied up the Trends filters on iPhone so the labels no longer get awkwardly cut off in portrait mode.",
             "Reworked that filter area to stack more naturally when space is tight, while keeping the wider layout unchanged elsewhere.",
@@ -58,7 +70,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.98",
         title: "Safer Storage & Feedback",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Moved the feedback contact details out of the main app code and tightened up how that information is handled behind the scenes.",
             "Added stronger protection for saved benchmark history so your results are stored more securely while still syncing and loading as expected.",
@@ -68,7 +80,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.97",
         title: "Cleaner Steel & Comparisons",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Tidied up the benchmark warnings so older graphics runs are explained more clearly without cluttering normal result viewing.",
             "Fixed the Mac compare and reference pickers so they open at a sensible height and actually show the full list of saved runs.",
@@ -78,7 +90,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.96",
         title: "Balls of Steel",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Reworked the graphics benchmark so it leans more on actual GPU compute work instead of simpler copy-heavy behaviour.",
             "Improved the Metal test path to make graphics runs more dependable and less likely to fall back unexpectedly.",
@@ -88,7 +100,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.95",
         title: "Smoother Results",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Improved benchmark consistency so results feel far less jumpy between different ways of installing and launching the app.",
             "Tidied up a few rough edges in the benchmark flow to make fresh installs behave more predictably.",
@@ -98,7 +110,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.94",
         title: "Mac Polish Pass",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Refined the Mac layout so the app feels more at home on a desktop window.",
             "Adjusted spacing and sizing in a few places to stop panels from feeling oversized or cramped.",
@@ -108,7 +120,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.93",
         title: "History, But Tidier",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Reworked the Mac history view so it behaves more naturally when resizing the window.",
             "Smoothed out the sidebar and detail layout to avoid awkward jumps while browsing old benchmark runs.",
@@ -118,7 +130,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.92",
         title: "Cloudy Skies with a Chance of Mac",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Added App Sandbox Support to allow for test builds of Bencher for MacOS.",
             "Changed project permission settings of Bencher."
@@ -127,7 +139,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.91",
         title: "Cloudy Skies+",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Changed program signing and capabilities.",
             "Increased minimum iOS requirements to run Bencher (iOS 17)."
@@ -136,7 +148,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V0.90",
         title: "Cloudy Skies",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Added iCloud support for storing benchmark results.",
             "Made iCloud support toggleable in settings."

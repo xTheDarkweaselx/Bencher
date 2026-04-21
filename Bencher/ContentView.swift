@@ -509,36 +509,24 @@ struct BenchmarkView: View {
 
                     HStack(spacing: 12) {
                         Button(action: runBenchmark) {
-                            Text(isRunning ? "Running..." : (benchmarkComplete ? "Run Again" : "Run Benchmark"))
-                                .font(.title2)
-                                .padding()
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .background(isRunning ? Color.gray : Color.blue)
-                                .cornerRadius(10)
+                            benchmarkActionButtonLabel(
+                                title: isRunning ? "Running..." : (benchmarkComplete ? "Run Again" : "Run Benchmark"),
+                                color: isRunning ? .gray : .blue
+                            )
                         }
+                        .buttonStyle(.plain)
                         .disabled(isRunning)
 
                         if isRunning {
                             Button(action: cancelBenchmark) {
-                                Text("Cancel")
-                                    .font(.title2)
-                                    .padding()
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color.red)
-                                    .cornerRadius(10)
+                                benchmarkActionButtonLabel(title: "Cancel", color: .red)
                             }
+                            .buttonStyle(.plain)
                         } else if benchmarkComplete {
                             Button(action: acknowledgeBenchmarkCompletion) {
-                                Text("OK")
-                                    .font(.title2)
-                                    .padding()
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color.green)
-                                    .cornerRadius(10)
+                                benchmarkActionButtonLabel(title: "OK", color: .green)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.top, 12)
@@ -553,6 +541,19 @@ struct BenchmarkView: View {
 
     private var benchmarkCardBackground: Color {
         colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)
+    }
+
+    private func benchmarkActionButtonLabel(title: String, color: Color) -> some View {
+        Text(title)
+            .font(.title2)
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(color)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var hasAnyVisibleScores: Bool {
@@ -3403,32 +3404,10 @@ class Benchmark {
 
     @_optimize(none)
     func measureCPUBenchmark() -> Double {
-        let coreCount = max(ProcessInfo.processInfo.activeProcessorCount, 2)
-        let iterationsPerCore = max(cpuTaskIterations / coreCount, 25_000_000)
-        let totals = UnsafeMutableBufferPointer<Double>.allocate(capacity: coreCount)
-        defer { totals.deallocate() }
-
-        for index in 0..<coreCount {
-            totals[index] = 0
+        let samples = (0..<3).map { sampleIndex in
+            measureTimedMultiCoreThroughput(sampleIndex: sampleIndex)
         }
-
-        let start = CFAbsoluteTimeGetCurrent()
-
-        DispatchQueue.concurrentPerform(iterations: coreCount) { coreIndex in
-            let startIndex = coreIndex * iterationsPerCore + 1
-            let endIndex = startIndex + iterationsPerCore
-            totals[coreIndex] = cpuKernelSlice(startIndex: startIndex, endIndex: endIndex)
-        }
-
-        BenchmarkBlackHole.consume(totals.reduce(0, +))
-
-        let timeTaken = CFAbsoluteTimeGetCurrent() - start
-        guard timeTaken > 0 else { return 0 }
-
-        let effectiveIterations = Double(iterationsPerCore * coreCount)
-        let scalingFactor = max(pow(Double(coreCount), 0.25), 1.0)
-        let rawScore = (effectiveIterations / timeTaken) / scalingFactor
-        return rawScore / normalizationFactor
+        return medianBenchmarkSample(samples) ?? 0
     }
 
     @_optimize(none)
@@ -3609,6 +3588,17 @@ class Benchmark {
             (elementCount: 786_432, kernelIterations: 192, passCount: 18),
             (elementCount: 524_288, kernelIterations: 160, passCount: 16)
         ]
+    }
+
+    private var cpuBenchmarkTargetDuration: Double {
+        switch cpuTaskIterations {
+        case ..<300_000_000:
+            0.45
+        case 700_000_000...:
+            0.95
+        default:
+            0.70
+        }
     }
 
     private func preferredMetalDevice() -> MTLDevice? {
@@ -3941,6 +3931,98 @@ class Benchmark {
         return localSum
     }
 
+    @_optimize(none)
+    private func cpuKernelChunk(startIndex: Int, iterationCount: Int) -> Double {
+        let endIndex = startIndex + iterationCount
+        return cpuKernelSlice(startIndex: startIndex, endIndex: endIndex)
+    }
+
+    @_optimize(none)
+    private func measureTimedMultiCoreThroughput(sampleIndex: Int) -> Double {
+        let workerCount = max(ProcessInfo.processInfo.activeProcessorCount, 2)
+        let chunkIterations = 120_000
+        let targetDuration = cpuBenchmarkTargetDuration
+        let totals = UnsafeMutableBufferPointer<Double>.allocate(capacity: workerCount)
+        let completedChunks = UnsafeMutableBufferPointer<Int>.allocate(capacity: workerCount)
+        defer {
+            totals.deallocate()
+            completedChunks.deallocate()
+        }
+
+        for index in 0..<workerCount {
+            totals[index] = 0
+            completedChunks[index] = 0
+        }
+
+        let readyGroup = DispatchGroup()
+        let finishedGroup = DispatchGroup()
+        let startGate = DispatchSemaphore(value: 0)
+        let workerQueue = DispatchQueue.global(qos: .userInitiated)
+
+        for workerIndex in 0..<workerCount {
+            readyGroup.enter()
+            finishedGroup.enter()
+            workerQueue.async {
+                readyGroup.leave()
+                startGate.wait()
+
+                let deadline = CFAbsoluteTimeGetCurrent() + targetDuration
+                var localTotal = 0.0
+                var chunks = 0
+                var startIndex = (sampleIndex + 1) * 1_000_000 + workerIndex * chunkIterations + 1
+
+                while CFAbsoluteTimeGetCurrent() < deadline {
+                    localTotal += self.cpuKernelChunk(startIndex: startIndex, iterationCount: chunkIterations)
+                    chunks += 1
+                    startIndex += workerCount * chunkIterations
+                }
+
+                totals[workerIndex] = localTotal
+                completedChunks[workerIndex] = chunks
+                finishedGroup.leave()
+            }
+        }
+
+        readyGroup.wait()
+        let sampleStart = CFAbsoluteTimeGetCurrent()
+        for _ in 0..<workerCount {
+            startGate.signal()
+        }
+        finishedGroup.wait()
+
+        BenchmarkBlackHole.consume(totals.reduce(0, +))
+
+        let elapsed = CFAbsoluteTimeGetCurrent() - sampleStart
+        guard elapsed > 0 else { return 0 }
+
+        let completedIterations = completedChunks.reduce(0, +) * chunkIterations
+        return (Double(completedIterations) / elapsed) / normalizationFactor
+    }
+
+    @_optimize(none)
+    private func measureTimedSingleCoreThroughput(sampleIndex: Int) -> Double {
+        let chunkIterations = 160_000
+        let sampleStart = CFAbsoluteTimeGetCurrent()
+        let deadline = sampleStart + cpuBenchmarkTargetDuration
+        var checksum = 0.0
+        var completedChunks = 0
+        var startIndex = (sampleIndex + 1) * 1_000_000 + 1
+
+        while CFAbsoluteTimeGetCurrent() < deadline {
+            checksum += cpuKernelChunk(startIndex: startIndex, iterationCount: chunkIterations)
+            completedChunks += 1
+            startIndex += chunkIterations
+        }
+
+        BenchmarkBlackHole.consume(checksum)
+
+        let elapsed = CFAbsoluteTimeGetCurrent() - sampleStart
+        guard elapsed > 0 else { return 0 }
+
+        let completedIterations = completedChunks * chunkIterations
+        return (Double(completedIterations) / elapsed) / normalizationFactor
+    }
+
     #if canImport(AppKit)
     @_optimize(none)
     private func renderAppKitGraphicsFrame(size: NSSize, frame: Int) {
@@ -3969,26 +4051,12 @@ class Benchmark {
 
     @_optimize(none)
     func measureSingleCoreBenchmark() -> Double {
-        let singleCoreIterations = max(cpuTaskIterations / 6, 60_000_000)
-        let start = CFAbsoluteTimeGetCurrent()
-        var sum = 0.0
-
-        for i in 1...singleCoreIterations {
-            let value = Double(i)
-            sum += sin(value) * cos(value * 0.5)
-                + sin(value * 0.125) * 0.5
-                + log(value + 1.0)
-                + sqrt(value) * 0.001
+        let samples = (0..<3).map { sampleIndex in
+            measureTimedSingleCoreThroughput(sampleIndex: sampleIndex)
         }
-
-        BenchmarkBlackHole.consume(sum)
-
-        let timeTaken = CFAbsoluteTimeGetCurrent() - start
-        guard timeTaken > 0 else { return 0 }
-
-        let rawScore = Double(singleCoreIterations) / timeTaken
-        return rawScore / normalizationFactor
+        return medianBenchmarkSample(samples) ?? 0
     }
+
 
     private func reportMemory() -> UInt64 {
         var taskInfo = mach_task_basic_info()
@@ -7199,13 +7267,16 @@ private struct UpdatesBrowserContent: View {
     @State private var searchText: String = ""
     private let updates: [AppUpdateEntry] = BencherReleaseNotesEntries
 
-    private var filteredUpdates: [AppUpdateEntry] {
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return updates }
+    private var trimmedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
-        return updates.filter { update in
-            update.searchableText.localizedCaseInsensitiveContains(trimmed)
-        }
+    private var isSearching: Bool {
+        !trimmedSearchText.isEmpty
+    }
+
+    private var filteredUpdates: [AppUpdateEntry] {
+        updates.rankedUpdateSearchResults(for: trimmedSearchText)
     }
 
     private var currentBuildUpdates: [AppUpdateEntry] {
@@ -7225,6 +7296,12 @@ private struct UpdatesBrowserContent: View {
         #if os(macOS)
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                searchSummary
+
+                if filteredUpdates.isEmpty {
+                    noSearchResultsView
+                }
+
                 if !currentBuildUpdates.isEmpty {
                     updateSection("Current Build", entries: currentBuildUpdates)
                 }
@@ -7245,16 +7322,15 @@ private struct UpdatesBrowserContent: View {
         .background(BencherPlatformColors.systemBackground)
         #else
         List {
+            if isSearching {
+                Section {
+                    searchSummary
+                }
+            }
+
             if filteredUpdates.isEmpty {
                 Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("No matching updates")
-                            .font(.headline)
-                        Text("Try a version number, feature name or keyword from the release notes.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 6)
+                    noSearchResultsView
                 }
             }
 
@@ -7287,7 +7363,27 @@ private struct UpdatesBrowserContent: View {
 
     var body: some View {
         updatesContent
-            .searchable(text: $searchText, prompt: "Search updates")
+            .searchable(text: $searchText, prompt: "Search versions, fixes or features")
+    }
+
+    @ViewBuilder
+    private var searchSummary: some View {
+        if isSearching {
+            Text("\(filteredUpdates.count) \(filteredUpdates.count == 1 ? "match" : "matches") for \"\(trimmedSearchText)\"")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private var noSearchResultsView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("No matching updates")
+                .font(.headline)
+            Text("Try a version number, feature name or a few words from the release notes.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -7352,6 +7448,92 @@ struct AppUpdateEntry: Identifiable {
 
     var searchableText: String {
         ([version, title, releaseDate] + changes).joined(separator: " ")
+    }
+}
+
+enum UpdateSearchIndex {
+    static func tokens(from query: String) -> [String] {
+        normalized(query)
+            .split(separator: " ")
+            .map(String.init)
+    }
+
+    static func normalized(_ text: String) -> String {
+        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let scalars = folded.unicodeScalars.map { scalar in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
+        }
+        return String(scalars)
+            .lowercased()
+            .split(separator: " ")
+            .joined(separator: " ")
+    }
+
+    static func compactNormalized(_ text: String) -> String {
+        normalized(text).replacingOccurrences(of: " ", with: "")
+    }
+}
+
+extension AppUpdateEntry {
+    fileprivate func matchesSearch(tokens: [String]) -> Bool {
+        guard !tokens.isEmpty else { return true }
+        let indexedText = UpdateSearchIndex.normalized(searchableText)
+        let compactIndexedText = UpdateSearchIndex.compactNormalized(searchableText)
+
+        return tokens.allSatisfy { token in
+            indexedText.contains(token) || compactIndexedText.contains(token)
+        }
+    }
+
+    fileprivate func searchRank(for tokens: [String], originalQuery: String) -> Int {
+        guard !tokens.isEmpty else { return 0 }
+
+        let normalizedQuery = UpdateSearchIndex.normalized(originalQuery)
+        let versionText = UpdateSearchIndex.normalized(version)
+        let titleText = UpdateSearchIndex.normalized(title)
+        let releaseText = UpdateSearchIndex.normalized(releaseDate)
+        let changesText = UpdateSearchIndex.normalized(changes.joined(separator: " "))
+        let allText = UpdateSearchIndex.normalized(searchableText)
+        let compactVersionText = UpdateSearchIndex.compactNormalized(version)
+
+        var rank = allText.contains(normalizedQuery) ? 100 : 0
+
+        for token in tokens {
+            if versionText.contains(token) || compactVersionText.contains(token) {
+                rank += 80
+            }
+            if titleText.contains(token) {
+                rank += 60
+            }
+            if releaseText.contains(token) {
+                rank += 30
+            }
+            if changesText.contains(token) {
+                rank += 15
+            }
+        }
+
+        return rank
+    }
+}
+
+extension Array where Element == AppUpdateEntry {
+    func rankedUpdateSearchResults(for query: String) -> [AppUpdateEntry] {
+        let tokens = UpdateSearchIndex.tokens(from: query)
+        guard !tokens.isEmpty else { return self }
+
+        return enumerated()
+            .compactMap { index, update -> (index: Int, update: AppUpdateEntry, rank: Int)? in
+                guard update.matchesSearch(tokens: tokens) else { return nil }
+                return (index, update, update.searchRank(for: tokens, originalQuery: query))
+            }
+            .sorted { lhs, rhs in
+                if lhs.rank != rhs.rank {
+                    return lhs.rank > rhs.rank
+                }
+                return lhs.index < rhs.index
+            }
+            .map(\.update)
     }
 }
 
