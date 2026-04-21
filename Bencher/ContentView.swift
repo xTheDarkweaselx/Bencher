@@ -3954,41 +3954,23 @@ class Benchmark {
             completedChunks[index] = 0
         }
 
-        let readyGroup = DispatchGroup()
-        let finishedGroup = DispatchGroup()
-        let startGate = DispatchSemaphore(value: 0)
-        let workerQueue = DispatchQueue.global(qos: .userInitiated)
-
-        for workerIndex in 0..<workerCount {
-            readyGroup.enter()
-            finishedGroup.enter()
-            workerQueue.async {
-                readyGroup.leave()
-                startGate.wait()
-
-                let deadline = CFAbsoluteTimeGetCurrent() + targetDuration
-                var localTotal = 0.0
-                var chunks = 0
-                var startIndex = (sampleIndex + 1) * 1_000_000 + workerIndex * chunkIterations + 1
-
-                while CFAbsoluteTimeGetCurrent() < deadline {
-                    localTotal += self.cpuKernelChunk(startIndex: startIndex, iterationCount: chunkIterations)
-                    chunks += 1
-                    startIndex += workerCount * chunkIterations
-                }
-
-                totals[workerIndex] = localTotal
-                completedChunks[workerIndex] = chunks
-                finishedGroup.leave()
-            }
-        }
-
-        readyGroup.wait()
         let sampleStart = CFAbsoluteTimeGetCurrent()
-        for _ in 0..<workerCount {
-            startGate.signal()
+        let deadline = sampleStart + targetDuration
+
+        DispatchQueue.concurrentPerform(iterations: workerCount) { workerIndex in
+            var localTotal = 0.0
+            var chunks = 0
+            var startIndex = (sampleIndex + 1) * 1_000_000 + workerIndex * chunkIterations + 1
+
+            while CFAbsoluteTimeGetCurrent() < deadline {
+                localTotal += self.cpuKernelChunk(startIndex: startIndex, iterationCount: chunkIterations)
+                chunks += 1
+                startIndex += workerCount * chunkIterations
+            }
+
+            totals[workerIndex] = localTotal
+            completedChunks[workerIndex] = chunks
         }
-        finishedGroup.wait()
 
         BenchmarkBlackHole.consume(totals.reduce(0, +))
 
@@ -4919,9 +4901,14 @@ struct CompareSelectionView: View {
 struct CompareResultsView: View {
     let results: [BenchmarkResult]
     var onClose: (() -> Void)? = nil
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var left: BenchmarkResult? { results.indices.contains(0) ? results[0] : nil }
     private var right: BenchmarkResult? { results.indices.contains(1) ? results[1] : nil }
+
+    private var usesCompactComparisonLayout: Bool {
+        horizontalSizeClass == .compact
+    }
     
     private var winnerSummary: String {
         guard let left, let right else { return "" }
@@ -5102,9 +5089,16 @@ struct CompareResultsView: View {
                 }
 
                 if let left, let right {
-                    HStack(alignment: .top, spacing: 16) {
-                        comparisonHeader(for: left)
-                        comparisonHeader(for: right)
+                    if usesCompactComparisonLayout {
+                        VStack(alignment: .leading, spacing: 12) {
+                            comparisonHeader(for: left)
+                            comparisonHeader(for: right)
+                        }
+                    } else {
+                        HStack(alignment: .top, spacing: 16) {
+                            comparisonHeader(for: left)
+                            comparisonHeader(for: right)
+                        }
                     }
 
                     ComparisonMetricRow(title: "Overall", leftValue: left.overallScore, rightValue: right.overallScore)
@@ -5150,24 +5144,14 @@ struct CompareResultsView: View {
                 .font(.caption)
                 .foregroundColor(.white.opacity(0.85))
 
-            HStack(spacing: 6) {
-                comparisonHeaderTag(
-                    title: result.benchmarkIntensity,
-                    systemImage: "dial.medium",
-                    backgroundColor: Color.white.opacity(0.16)
-                )
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    comparisonHeaderTags(for: result)
+                }
 
-                comparisonHeaderTag(
-                    title: result.graphicsBackend,
-                    systemImage: "display",
-                    backgroundColor: Color.white.opacity(0.16)
-                )
-
-                comparisonHeaderTag(
-                    title: thermalStateText(result.thermalState),
-                    systemImage: "thermometer.medium",
-                    backgroundColor: result.thermalState > 0 ? Color.orange.opacity(0.35) : Color.white.opacity(0.16)
-                )
+                VStack(alignment: .leading, spacing: 6) {
+                    comparisonHeaderTags(for: result)
+                }
             }
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -5188,6 +5172,27 @@ struct CompareResultsView: View {
     }
 
     @ViewBuilder
+    private func comparisonHeaderTags(for result: BenchmarkResult) -> some View {
+        comparisonHeaderTag(
+            title: result.benchmarkIntensity,
+            systemImage: "dial.medium",
+            backgroundColor: Color.white.opacity(0.16)
+        )
+
+        comparisonHeaderTag(
+            title: result.graphicsBackend,
+            systemImage: "display",
+            backgroundColor: Color.white.opacity(0.16)
+        )
+
+        comparisonHeaderTag(
+            title: thermalStateText(result.thermalState),
+            systemImage: "thermometer.medium",
+            backgroundColor: result.thermalState > 0 ? Color.orange.opacity(0.35) : Color.white.opacity(0.16)
+        )
+    }
+
+    @ViewBuilder
     private func comparisonHeaderTag(title: String, systemImage: String, backgroundColor: Color) -> some View {
         HStack(spacing: 5) {
             Image(systemName: systemImage)
@@ -5195,7 +5200,7 @@ struct CompareResultsView: View {
             Text(title)
                 .font(.caption2.weight(.semibold))
                 .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+                .minimumScaleFactor(0.8)
         }
         .foregroundColor(.white)
         .padding(.horizontal, 8)
@@ -5224,6 +5229,11 @@ struct ComparisonMetricRow: View {
     let title: String
     let leftValue: Double
     let rightValue: Double
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var usesCompactLayout: Bool {
+        horizontalSizeClass == .compact
+    }
     
     private var delta: Double {
         rightValue - leftValue
@@ -5247,9 +5257,16 @@ struct ComparisonMetricRow: View {
                     .clipShape(Capsule())
             }
             
-            HStack(alignment: .center, spacing: 16) {
-                comparisonValueCard(label: "Run A", value: leftValue, color: .blue, isWinner: leftValue > rightValue)
-                comparisonValueCard(label: "Run B", value: rightValue, color: .purple, isWinner: rightValue > leftValue)
+            if usesCompactLayout {
+                VStack(alignment: .leading, spacing: 10) {
+                    comparisonValueCard(label: "Run A", value: leftValue, color: .blue, isWinner: leftValue > rightValue)
+                    comparisonValueCard(label: "Run B", value: rightValue, color: .purple, isWinner: rightValue > leftValue)
+                }
+            } else {
+                HStack(alignment: .center, spacing: 16) {
+                    comparisonValueCard(label: "Run A", value: leftValue, color: .blue, isWinner: leftValue > rightValue)
+                    comparisonValueCard(label: "Run B", value: rightValue, color: .purple, isWinner: rightValue > leftValue)
+                }
             }
         }
         .padding()

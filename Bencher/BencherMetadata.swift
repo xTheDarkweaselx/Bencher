@@ -16,9 +16,17 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
+        version: "V1.11",
+        title: "Comparison View Hotfix",
+        releaseDate: "Current Build",
+        changes: [
+            "Changed the comparison view from forced as landscape (meaning it shows two results to side by side all the way of the screen) to potrait.",
+        ]
+    ),
+    AppUpdateEntry(
         version: "V1.10",
         title: "Cleaner Benchmarking & Controls",
-        releaseDate: "Current Build",
+        releaseDate: "Previous Build",
         changes: [
             "Cleaned up the Benchmark screen action buttons so the run, running and cancel controls no longer show awkward extra padding around the corners.",
             "Kept the same clear button colors while removing the default button treatment that could make the controls look boxed in.",
