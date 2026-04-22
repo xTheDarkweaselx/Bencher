@@ -22,15 +22,39 @@ import UIKit
 import AppKit
 #endif
 
+enum ICloudAccountAvailability {
+    static var isAvailable: Bool {
+        FileManager.default.ubiquityIdentityToken != nil
+    }
+}
+
+private extension View {
+    func iCloudNoAccountAlert(
+        isPresented: Binding<Bool>,
+        suppressFutureWarnings: @escaping () -> Void
+    ) -> some View {
+        alert("iCloud Account Needed", isPresented: isPresented) {
+            Button("OK", role: .cancel) { }
+            Button("Don't Show Again") {
+                suppressFutureWarnings()
+            }
+        } message: {
+            Text("Bencher could not find an iCloud account on this device, so benchmark history will stay local for now. Sign in to iCloud in Settings, then turn sync off and back on to try again.")
+        }
+    }
+}
+
 // MARK: - Main ContentView
 struct ContentView: View {
     @State private var scores: [BenchmarkResult] = BenchmarkStorage.load()
     @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "Dark"
     @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
+    @AppStorage("icloudNoAccountWarningDismissed") private var iCloudNoAccountWarningDismissed: Bool = false
     @State private var selectedTab: String = "dashboard"
     @State private var pendingHistoryAction: DashboardHistoryAction? = nil
     @State private var pendingHistorySelection: BenchmarkResult.ID? = nil
     @State private var hasPreparedStorage: Bool = false
+    @State private var isShowingICloudNoAccountAlert: Bool = false
 
     private var usesSettingsHostedUpdatesOnIOS: Bool {
         #if canImport(UIKit)
@@ -66,14 +90,25 @@ struct ContentView: View {
             #endif
             scores = BenchmarkStorage.load()
             hasPreparedStorage = true
+            presentICloudNoAccountAlertIfNeeded()
         }
         .onChange(of: iCloudHistorySyncEnabled) { _, isEnabled in
+            if !isEnabled {
+                iCloudNoAccountWarningDismissed = false
+            }
             scores = BenchmarkStorage.setICloudSyncEnabled(isEnabled, currentScores: scores)
+            presentICloudNoAccountAlertIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)) { _ in
             guard iCloudHistorySyncEnabled else { return }
             scores = BenchmarkStorage.load()
         }
+        .iCloudNoAccountAlert(
+            isPresented: $isShowingICloudNoAccountAlert,
+            suppressFutureWarnings: {
+                iCloudNoAccountWarningDismissed = true
+            }
+        )
         #else
         TabView(selection: $selectedTab) {
             DashboardView(scores: scores, selectedTab: $selectedTab, pendingHistoryAction: $pendingHistoryAction)
@@ -129,15 +164,33 @@ struct ContentView: View {
             #endif
             scores = BenchmarkStorage.load()
             hasPreparedStorage = true
+            presentICloudNoAccountAlertIfNeeded()
         }
         .onChange(of: iCloudHistorySyncEnabled) { _, isEnabled in
+            if !isEnabled {
+                iCloudNoAccountWarningDismissed = false
+            }
             scores = BenchmarkStorage.setICloudSyncEnabled(isEnabled, currentScores: scores)
+            presentICloudNoAccountAlertIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)) { _ in
             guard iCloudHistorySyncEnabled else { return }
             scores = BenchmarkStorage.load()
         }
+        .iCloudNoAccountAlert(
+            isPresented: $isShowingICloudNoAccountAlert,
+            suppressFutureWarnings: {
+                iCloudNoAccountWarningDismissed = true
+            }
+        )
         #endif
+    }
+
+    private func presentICloudNoAccountAlertIfNeeded() {
+        guard iCloudHistorySyncEnabled,
+              !ICloudAccountAvailability.isAvailable,
+              !iCloudNoAccountWarningDismissed else { return }
+        isShowingICloudNoAccountAlert = true
     }
 
     private var preferredColorScheme: ColorScheme? {
@@ -2703,7 +2756,7 @@ struct DetailedResultView: View {
     }
 
     private var comparisonWarningText: String? {
-        benchmarkComparisonWarning(primary: result, secondary: comparisonBase)
+        benchmarkComparisonWarning(primary: result)
     }
     
     @ViewBuilder
@@ -3354,7 +3407,7 @@ private func benchmarkComparisonWarning(primary: BenchmarkResult, secondary: Ben
     }
 
     guard primary.graphicsBackend == GraphicsBenchmarkBackend.legacy.rawValue else { return nil }
-    return "This run used Bencher's older graphics method, so its graphics score may not line up perfectly with newer results."
+    return "This result used Bencher's older graphics test. It is still fine to keep in your history, but the graphics score is not comparable with newer Metal results."
 }
 
 private func benchmarkBackendFilterTitle(_ backend: String) -> String {
@@ -4061,6 +4114,7 @@ enum BenchmarkStorage {
     private static let localStorageKey = "bencher.history.v1"
     private static let iCloudStorageKey = "bencher.history.icloud.v1"
     private static let iCloudSyncEnabledKey = "icloudHistorySyncEnabled"
+    private static let iCloudNoAccountWarningDismissedKey = "icloudNoAccountWarningDismissed"
 
     private enum Backend {
         case local
@@ -4076,7 +4130,7 @@ enum BenchmarkStorage {
     }
 
     static func prepareForLaunch() {
-        guard isICloudSyncEnabled else { return }
+        guard isICloudSyncEnabled, ICloudAccountAvailability.isAvailable else { return }
         _ = NSUbiquitousKeyValueStore.default.synchronize()
     }
 
@@ -4085,11 +4139,16 @@ enum BenchmarkStorage {
         UserDefaults.standard.set(isEnabled, forKey: iCloudSyncEnabledKey)
 
         if isEnabled {
+            guard ICloudAccountAvailability.isAvailable else {
+                save(normalizedCurrent, to: .local)
+                return normalizedCurrent
+            }
             _ = NSUbiquitousKeyValueStore.default.synchronize()
             let merged = mergeForImport(existing: load(from: .iCloud), imported: normalizedCurrent)
             save(merged, to: .iCloud)
             return merged
         } else {
+            UserDefaults.standard.set(false, forKey: iCloudNoAccountWarningDismissedKey)
             let merged = mergeForImport(existing: load(from: .local), imported: normalizedCurrent)
             save(merged, to: .local)
             return merged
@@ -4105,7 +4164,7 @@ enum BenchmarkStorage {
     }
 
     private static var activeBackend: Backend {
-        isICloudSyncEnabled ? .iCloud : .local
+        isICloudSyncEnabled && ICloudAccountAvailability.isAvailable ? .iCloud : .local
     }
 
     private static func load(from backend: Backend) -> [BenchmarkResult] {

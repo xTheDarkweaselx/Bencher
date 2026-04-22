@@ -16,9 +16,21 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
-        version: "V1.2",
-        title: "Comparison+ Pro Max Ultra",
+        version: "V1.30",
+        title: "Release Version Polish",
         releaseDate: "Current Build",
+        changes: [
+            "Polished older update notes so the release history reads more naturally and feels less like internal development notes.",
+            "Cleaned up wording around older Mac, iCloud, History, Trends, Reference and export changes while keeping the original update titles intact.",
+            "Improved older benchmark detail warnings so legacy graphics results are explained clearly when you are only viewing a saved result.",
+            "Kept the comparison-specific warning for actual side-by-side comparisons, where setup differences still matter.",
+            "Added a clearer iCloud sign-in message when sync is enabled without an iCloud account, while keeping benchmark history safely local until iCloud is available."
+        ]
+    ),
+    AppUpdateEntry(
+        version: "V1.20",
+        title: "Comparison+ Pro Max Ultra",
+        releaseDate: "Previous Build",
         changes: [
             "Updated comparison results so changes are easier to read, with clearer wording for same-device history and device-to-device comparisons.",
             "Added a simple Flip control at the top of the comparison view so you can quickly switch which result is treated as the starting point.",
@@ -29,15 +41,15 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V1.11",
         title: "Comparison View Hotfix",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
-            "Changed the comparison view from forced as landscape (meaning it shows two results to side by side all the way of the screen) to potrait.",
+            "Fixed the comparison view on smaller screens so results no longer feel forced into a wide side-by-side layout.",
         ]
     ),
     AppUpdateEntry(
         version: "V1.10",
         title: "Cleaner Benchmarking & Controls",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Cleaned up the Benchmark screen action buttons so the run, running and cancel controls no longer show awkward extra padding around the corners.",
             "Kept the same clear button colors while removing the default button treatment that could make the controls look boxed in.",
@@ -151,8 +163,8 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Cloudy Skies with a Chance of Mac",
         releaseDate: "Older Build",
         changes: [
-            "Added App Sandbox Support to allow for test builds of Bencher for MacOS.",
-            "Changed project permission settings of Bencher."
+            "Prepared the Mac version for safer TestFlight builds with the right sandbox permissions in place.",
+            "Cleaned up the app's Mac permission setup so it behaves more predictably during testing."
         ]
     ),
     AppUpdateEntry(
@@ -160,8 +172,8 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Cloudy Skies+",
         releaseDate: "Older Build",
         changes: [
-            "Changed program signing and capabilities.",
-            "Increased minimum iOS requirements to run Bencher (iOS 17)."
+            "Updated Bencher's signing and app capabilities to support the next stage of testing.",
+            "Raised the minimum iOS version so the app can rely on the newer system features it now uses."
         ]
     ),
     AppUpdateEntry(
@@ -169,8 +181,8 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Cloudy Skies",
         releaseDate: "Older Build",
         changes: [
-            "Added iCloud support for storing benchmark results.",
-            "Made iCloud support toggleable in settings."
+            "Added optional iCloud support for keeping benchmark history available across your devices.",
+            "Added a Settings switch so you can choose whether Bencher stores history locally or syncs it with iCloud."
         ]
     ),
     AppUpdateEntry(
@@ -178,11 +190,11 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Mac to the Future",
         releaseDate: "Older Build",
         changes: [
-            "Added full MacOS support.",
-            "Changed the settings view for MacOS users to make it more inline for the platforms' design philosophy.",
-            "Added a new side menu bar in MacOS that is similar to the iPadOS version but with a more streamlined Mac design.",
-            "Updated the presentation of updates in the MacOS version to make it look cleaner.",
-            "Reversed changes on the history sidebar and detailed result view to make it look more like the iPadOS version again, implementing a new design system instead to make it workon MacOS."
+            "Added full Mac support so Bencher feels at home on desktop as well as iPhone and iPad.",
+            "Reworked Settings on Mac so it feels more natural in a desktop window.",
+            "Added a cleaner Mac sidebar for moving between the main parts of the app.",
+            "Polished the Updates screen on Mac so release notes are easier to read.",
+            "Refined History on Mac so the sidebar and detail view feel closer to the iPad layout while still fitting a desktop window."
         ]
     ),
     AppUpdateEntry(
@@ -190,11 +202,11 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Big Mac Energy",
         releaseDate: "Older Build",
         changes: [
-            "Added MacOS Catalyst support.",
-            "Added automatic update feature on device names recently added to the reference list that weren't originally",
-            "Added a history sidebar and detailed result view in MacOS like the iPadOS version.",
-            "Reworked History on MacOS to ensure the tab bar at the top is always visible.",
-            "Changed the close button in the reference tab to be a x-mark rather than text."
+            "Brought Bencher to Mac through Catalyst as the first step toward a proper desktop version.",
+            "Improved device naming so newer reference devices can be recognised more smoothly.",
+            "Added a Mac History layout with a sidebar and detailed result view, similar to the iPad experience.",
+            "Adjusted History on Mac so navigation stays easier to reach while browsing saved results.",
+            "Changed the Reference close button to a cleaner x-mark icon."
         ]
     ),
     AppUpdateEntry(
@@ -211,8 +223,8 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Sheen and Polish",
         releaseDate: "Older Build",
         changes: [
-            "Changed descriptions of functions to make them more consistent with the rest of the app.",
-            "Reworked descriptions to make them more user-friendly and less programmer-esque language."
+            "Rewrote several explanations so the app speaks more consistently from screen to screen.",
+            "Made benchmark descriptions easier to understand without needing technical background."
         ]
     ),
     AppUpdateEntry(
@@ -220,10 +232,10 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Reference and Compare Search Improvements",
         releaseDate: "Older Build",
         changes: [
-            "Added searchable result selection to the Compare flow so large benchmark histories can be narrowed by device, score, date or mode.",
-            "Reworked the Reference tab result picker into a dedicated searchable chooser for better long-term scalability with many saved runs.",
-            "Restored the native searchable presentation for those picker flows after confirming the earlier lag was mainly a debug-time Xcode issue.",
-            "Improved result-picking usability across comparison-focused screens without changing comparison logic or saved benchmark data."
+            "Added search to the Compare picker so large histories are easier to narrow by device, score, date or mode.",
+            "Gave the Reference result picker its own searchable chooser, making it much easier to use with lots of saved runs.",
+            "Brought back the native search presentation once it was clear the earlier lag was only showing up during development builds.",
+            "Made result picking feel smoother across comparison screens without changing any saved benchmark data."
         ]
     ),
     AppUpdateEntry(
@@ -232,9 +244,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         releaseDate: "Older Build",
         changes: [
             "Replaced the old static Reference Devices page with a comparison view that lets you choose a saved benchmark result.",
-            "Added selected-result summary presentation in Reference so the chosen run’s score, device and benchmark mode stay visible while comparing.",
-            "Added broad reference-band comparisons for iPhone, iPad and Mac ranges so saved results can be judged against practical device classes more directly.",
-            "Improved the Reference tab from passive guidance into a more useful analysis surface tied to your own benchmark history."
+            "Kept the chosen run's score, device and benchmark mode visible while you compare it against reference ranges.",
+            "Added broad iPhone, iPad and Mac reference bands so saved results are easier to place in context.",
+            "Turned Reference from a static guide into a more useful view tied to your own benchmark history."
         ]
     ),
     AppUpdateEntry(
@@ -242,10 +254,10 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Benchmark Tab Visual Refresh",
         releaseDate: "Older Build",
         changes: [
-            "Redesigned the Benchmark tab with a stronger hero section, clearer progress presentation and improved visual hierarchy.",
-            "Added a more polished status strip for benchmark intensity, stability runs and current run state.",
-            "Improved live-results presentation so score cards and progress sections feel more intentional and easier to scan.",
-            "Kept benchmark logic unchanged while making the Benchmark tab feel more polished and product-like."
+            "Refreshed the Benchmark tab with a clearer opening section and easier-to-follow progress display.",
+            "Added a cleaner status strip for benchmark mode, stability runs and current run state.",
+            "Made live results easier to scan while a benchmark is running.",
+            "Kept the benchmark itself unchanged while making the screen feel more polished."
         ]
     ),
     AppUpdateEntry(
@@ -253,10 +265,10 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Trends Presentation and Daily Result Refinements",
         releaseDate: "Older Build",
         changes: [
-            "Grouped Trends device and time-range controls into a single cleaner control panel with clearer filter labelling.",
-            "Improved Trends section-card styling so summaries, charts and recent-run areas feel more cohesive visually.",
-            "Refined selected-day presentation so same-day grouped points can show all runs from that day in a cleaner expanded layout.",
-            "Improved the overall Trends tab polish without changing chart calculations or benchmark data handling."
+            "Grouped the Trends device and time filters into a cleaner control area.",
+            "Polished Trends cards so summaries, charts and recent runs feel more connected.",
+            "Made grouped same-day results easier to open and review.",
+            "Improved the look of Trends without changing how scores are calculated."
         ]
     ),
     AppUpdateEntry(
@@ -264,10 +276,10 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Power State History Tracking and Filtering",
         releaseDate: "Older Build",
         changes: [
-            "Added saved power-state awareness so benchmark runs can record whether the device was on AC power when the run was captured.",
-            "Added charging-state visibility in detailed saved-result views for clearer context.",
-            "Added a new History secondary filter for power state alongside device, intensity and thermal filters.",
-            "Extended benchmark import and export support so saved power-state information remains portable."
+            "Saved whether a benchmark was run on battery or while connected to power.",
+            "Showed power state in detailed results so each run has a little more context.",
+            "Added a History filter for power state alongside device, mode and thermal filters.",
+            "Included power-state details when importing or exporting benchmark history."
         ]
     ),
     AppUpdateEntry(
@@ -275,10 +287,10 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Trends Daily Aggregation and Same-Day Drilldown",
         releaseDate: "Older Build",
         changes: [
-            "Changed Trends charts so multiple benchmark runs on the same day are grouped into one daily average point instead of clumping or laddering.",
-            "Updated selected Trend points to represent the day-average score for that date rather than only one underlying run.",
-            "Added day-level drilldown so selecting a grouped day can still show every individual run captured on that date.",
-            "Improved the path from grouped trend selection back into History so individual same-day runs remain accessible."
+            "Grouped multiple runs from the same day into one daily average point so charts are easier to read.",
+            "Made selected trend points represent the day's average instead of just one run.",
+            "Added a way to open a grouped day and still see every run from that date.",
+            "Kept individual same-day runs easy to reach from Trends and History."
         ]
     ),
     AppUpdateEntry(
@@ -287,9 +299,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         releaseDate: "Older Build",
         changes: [
             "Removed the old full-screen benchmark gradient background so the Benchmark tab now respects the app’s light and dark appearance more naturally.",
-            "Updated benchmark cards and summary surfaces to use cleaner adaptive materials instead of the older gradient-heavy presentation.",
-            "Refined History filter and action menus to reduce UIKit context-menu warnings seen during first interaction in development builds.",
-            "Improved visual consistency and interaction stability across Benchmark and History without changing saved results or benchmark scoring."
+            "Updated benchmark cards to use cleaner materials instead of the older gradient-heavy look.",
+            "Tidied History filter and action menus so they behave more smoothly.",
+            "Improved consistency across Benchmark and History without changing saved results or benchmark scoring."
         ]
     ),
     AppUpdateEntry(
@@ -299,12 +311,12 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         changes: [
             "Added Trends time-range filtering with 7D, 1M, 3M, 6M, 1Y and All options.",
             "Updated Trends chart scaling so changing the selected time range also updates the visible chart domain.",
-            "Improved trend-point selection accuracy by using both horizontal and vertical proximity when choosing the nearest benchmark run.",
-            "Fixed metric-chart Peak and Low annotations so they now reflect the active metric instead of incorrectly using overall score.",
-            "Updated selected trend markers so they render correctly when the chosen point is also the Peak or Low result.",
-            "Added a clearer Selected badge to trend result summary cards beneath the charts.",
-            "Improved the jump from Trends into History so selected chart runs can still open the matching detailed result view reliably.",
-            "Improved compact detail layouts by fixing missing horizontal padding in benchmark detail presentation on iPhone."
+            "Made tapping points on Trends charts feel more accurate.",
+            "Fixed Peak and Low labels so they match the metric currently being viewed.",
+            "Cleaned up selected chart markers, including cases where the selected run is also the Peak or Low point.",
+            "Added a clearer Selected badge beneath the charts.",
+            "Made it more reliable to jump from a selected Trends point into the matching History result.",
+            "Fixed missing side padding in detailed benchmark results on iPhone."
         ]
     ),
     AppUpdateEntry(
@@ -313,14 +325,14 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         releaseDate: "Older Build",
         changes: [
             "Added interactive Trends chart selection so tapping chart points now highlights the nearest benchmark run.",
-            "Added selected-run summary cards beneath trend charts showing the relevant metric value, device and timestamp.",
+            "Added selected-run cards beneath trend charts with the score, device and time for the highlighted run.",
             "Added an Open in History action from Trends so selected chart runs can jump directly into the matching History detail view.",
-            "Updated History and Trends coordination so selected trend results can open correctly on both iPhone and iPad flows.",
-            "Improved Compare view presentation by removing the redundant plain Compare title and keeping the richer Comparison heading.",
-            "Added crowned device names in the comparison header so the run leading the most main categories is clearly marked.",
-            "Improved comparison header chips so benchmark mode and thermal state stay on one line more reliably.",
-            "Refined comparison metric presentation by removing stray outer styling and keeping winner emphasis cleaner and more consistent.",
-            "Updated Trends chart hit-testing for modern iOS APIs by safely unwrapping plotFrame before using it."
+            "Made selected Trends results open correctly from both iPhone and iPad layouts.",
+            "Cleaned up the Compare screen heading.",
+            "Marked the run leading the most categories with a crown in the comparison header.",
+            "Improved comparison chips so benchmark mode and thermal state fit better.",
+            "Made comparison metric cards cleaner and easier to read.",
+            "Improved Trends chart tapping for newer iOS versions."
         ]
     ),
     AppUpdateEntry(
@@ -328,12 +340,12 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "History Navigation and Detail View Refinements",
         releaseDate: "Older Build",
         changes: [
-            "Refined compact History result opening so iPhone now presents detailed benchmark results more reliably again.",
-            "Replaced the broken compact History detail popup flow with a cleaner full-screen presentation for better stability and scrolling.",
-            "Improved iPhone History result navigation so tapping a saved run no longer leaves detail presentation frozen or malformed.",
-            "Polished the History detail presentation and overall interaction flow between saved results and detailed benchmark analysis.",
-            "Adjusted the detailed result Report Card pills so Tier and Bottleneck cards feel less squashed on both iPhone and iPad.",
-            "Refined iPad History header controls so Compare and Export remain on one line more reliably in the sidebar."
+            "Made saved History results open more reliably on iPhone.",
+            "Moved detailed results to a cleaner full-screen view on compact screens for better scrolling.",
+            "Fixed cases where opening a saved run could leave the detail view stuck or awkwardly presented.",
+            "Polished the flow between History and detailed benchmark analysis.",
+            "Gave Report Card pills more breathing room on iPhone and iPad.",
+            "Adjusted the iPad History header so Compare and Export fit more comfortably."
         ]
     ),
     AppUpdateEntry(
@@ -341,10 +353,10 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Phase 3 Visual Polish Completion",
         releaseDate: "Older Build",
         changes: [
-            "Completed the Phase 3 polish pass across Benchmark, Dashboard, History, Trends and detailed result views.",
-            "Improved the overall app feel with more consistent cards, chips, gradients, haptics and feedback patterns.",
-            "Refined both iPhone and iPad History layouts so the interface feels more native to each device class.",
-            "Improved the app from a functional benchmark tool into a more polished performance-analysis experience."
+            "Finished a broad polish pass across Benchmark, Dashboard, History, Trends and detailed results.",
+            "Made cards, chips, gradients, haptics and feedback feel more consistent across the app.",
+            "Refined History on both iPhone and iPad so each layout feels more natural.",
+            "Moved Bencher closer to a polished performance app rather than just a working benchmark tool."
         ]
     ),
     AppUpdateEntry(
@@ -353,9 +365,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         releaseDate: "Older Build",
         changes: [
             "Updated the History header area so controls now scroll away naturally with content on iPhone instead of staying fixed at the top.",
-            "Added a more compact iPhone-only History header layout with tighter title, control and chip spacing.",
+            "Added a tighter iPhone History header so the screen feels less crowded.",
             "Refined the iPad History header so Compare and Export stay on one line more reliably.",
-            "Improved History layout behaviour across different size classes without changing core workflows."
+            "Improved History layouts across screen sizes without changing the main workflow."
         ]
     ),
     AppUpdateEntry(
@@ -363,7 +375,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "History Selection Styling and iPad Detail Polish",
         releaseDate: "Older Build",
         changes: [
-            "Replaced the default iPad blue List selection highlight with a softer custom selection treatment.",
+            "Replaced the default iPad selection highlight with a softer custom style.",
             "Added a subtle border glow, shadow and lift effect to the selected History row for a more premium feel.",
             "Improved selected-row emphasis without overwhelming the rest of the History list.",
             "Refined History detail presentation so selection and focus feel cleaner on larger screens."
@@ -374,10 +386,10 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "History Row Card Polish",
         releaseDate: "Older Build",
         changes: [
-            "Redesigned History rows into richer card-style layouts with stronger hierarchy for score, device, date and status information.",
-            "Added reusable History status chips and tag chips for a cleaner, more glanceable presentation.",
-            "Improved favourite visibility, benchmark intensity visibility and thermal-state presentation in History rows.",
-            "Improved the visual consistency between History rows and the rest of the app’s newer card-based design."
+            "Redesigned History rows as richer cards with clearer score, device, date and status details.",
+            "Added cleaner status and tag chips so saved runs are easier to scan.",
+            "Made favourites, benchmark mode and thermal state easier to spot in History.",
+            "Brought History rows closer to the app's newer card-based design."
         ]
     ),
     AppUpdateEntry(
@@ -386,9 +398,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         releaseDate: "Older Build",
         changes: [
             "Polished the detailed benchmark result view so it now visually aligns more closely with the upgraded History rows.",
-            "Upgraded the result summary card with clearer hero styling, richer status chips and improved metadata presentation.",
-            "Converted Notes & Tags in detailed results to chip-based presentation for stronger consistency.",
-            "Unified detailed result cards, report sections and metric cards with the shared app styling system."
+            "Improved the main result summary with clearer styling and richer status chips.",
+            "Changed Notes & Tags into chips so they match the rest of the app better.",
+            "Made detailed result cards, reports and metrics feel more consistent."
         ]
     ),
     AppUpdateEntry(
@@ -396,9 +408,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Import Transparency and Better Result Messaging",
         releaseDate: "Older Build",
         changes: [
-            "Improved import completion messaging so the pop-up now shows how many results were newly added versus ignored as duplicates.",
-            "Made history import behaviour more transparent when importing files that overlap with locally stored benchmark records.",
-            "Improved user confidence in import operations by reporting actual merge outcomes instead of only generic success messages."
+            "Updated import messages to show how many results were added and how many were already in your history.",
+            "Made imports clearer when a file contains results you already have.",
+            "Replaced generic success messages with more useful import summaries."
         ]
     ),
     AppUpdateEntry(
@@ -406,9 +418,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Shared Theme System and Visual Consistency",
         releaseDate: "Older Build",
         changes: [
-            "Added a shared BencherTheme system for hero gradients, card gradients and accent chip gradients.",
-            "Improved visual consistency across Dashboard, History, Trends, Score Cards and detail screens.",
-            "Reduced one-off styling differences by centralising core gradient and card presentation patterns."
+            "Made Bencher's gradients, cards and accent chips more consistent across the app.",
+            "Improved visual consistency across Dashboard, History, Trends, score cards and detail screens.",
+            "Reduced mismatched styling so the app feels more unified."
         ]
     ),
     AppUpdateEntry(
@@ -416,9 +428,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Animation and Haptics Feedback Pass",
         releaseDate: "Older Build",
         changes: [
-            "Added animated Score Card appearance so benchmark metrics now enter more smoothly.",
-            "Added subtle haptic feedback for benchmark completion, export readiness, import success, import failure and undo restore.",
-            "Improved tactile feedback and responsiveness so key actions feel more deliberate and polished."
+            "Added smoother score card animations as benchmark results appear.",
+            "Added subtle haptics for benchmark completion, exports, imports and undo.",
+            "Made important actions feel a little more responsive and polished."
         ]
     ),
     AppUpdateEntry(
@@ -426,9 +438,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Dashboard and Trends Presentation Polish",
         releaseDate: "Older Build",
         changes: [
-            "Updated Dashboard cards and quick actions to use the shared visual styling system.",
-            "Improved the Trends empty state with a richer card-style presentation instead of plain text.",
-            "Improved Dashboard and Trends consistency so both now feel more integrated with the wider app design language."
+            "Polished Dashboard cards and quick actions so they match the rest of Bencher better.",
+            "Gave the empty Trends view a richer card instead of plain text.",
+            "Made Dashboard and Trends feel more connected to the wider app design."
         ]
     ),
     AppUpdateEntry(
@@ -436,9 +448,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Phase 3 Polish Foundations",
         releaseDate: "Older Build",
         changes: [
-            "Started the Phase 3 polish pass focused on visual consistency, empty states, animation and feedback quality.",
-            "Began refining the app from a feature-complete prototype into a more polished end-user product.",
-            "Established the groundwork for broader card, chip, gradient and interaction improvements across the app."
+            "Started a broader polish pass focused on visuals, empty states, animations and feedback.",
+            "Began moving Bencher from a feature-complete build toward a more finished app.",
+            "Laid the groundwork for cleaner cards, chips, gradients and interactions across the app."
         ]
     ),
     AppUpdateEntry(
@@ -448,8 +460,8 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         changes: [
             "Added an Undo action for the most recently deleted history item or deleted set of history items.",
             "Added a restore banner in History so recently deleted benchmark runs can be brought back quickly.",
-            "Standardised user-facing naming from pinning to favouriting while keeping storage compatible internally.",
-            "Updated visible History indicators and swipe actions to use favourite star icons for consistency."
+            "Changed visible wording from pinning to favourites, while keeping older saved data compatible.",
+            "Updated History indicators and swipe actions to use favourite star icons consistently."
         ]
     ),
     AppUpdateEntry(
@@ -540,9 +552,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         title: "Phase 2 History Management Foundations",
         releaseDate: "Older Build",
         changes: [
-            "Started the Phase 2 History management work focused on search, filtering, favourites and safer deletion workflows.",
-            "Expanded benchmark history records to support richer management features while keeping older saved data working.",
-            "Improved History from a simple archive into a more powerful benchmark management surface."
+            "Started a larger History upgrade focused on search, filters, favourites and safer deletion.",
+            "Expanded saved history details while keeping older results readable.",
+            "Made History feel less like a basic archive and more like a place to manage results properly."
         ]
     ),
     AppUpdateEntry(
@@ -553,9 +565,9 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
             "Added a new Reference Devices tab with broad guidance ranges for iPhone, iPad and Mac classes.",
             "Added a post-run Benchmark Report screen that appears after a benchmark completes and summarises the result.",
             "Added editable notes and tags for benchmark runs, including a dedicated editor from the History screen.",
-            "Extended benchmark history records with session IDs for stronger long-term metadata and grouping support.",
+            "Added session IDs to saved runs so benchmark history can keep better long-term context.",
             "Added a Report Card section in detailed benchmark results with performance tier, bottleneck detection and richer guidance.",
-            "Improved score card visuals with richer gradient styling and more polished card backgrounds.",
+            "Polished score cards with richer gradients and cleaner backgrounds.",
             "Improved device-aware reference guidance so detailed results now present ranges more fairly based on detected device class."
         ]
     ),
@@ -565,12 +577,12 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
         releaseDate: "Older Build",
         changes: [
             "Updated export so you can choose how many saved results to export, including the last 1, 5, 10, 15, 20 or all available results.",
-            "Improved export performance by moving export preparation off the main thread for both JSON and CSV export.",
+            "Made JSON and CSV exports feel quicker by preparing them in the background.",
             "Added a visible export progress banner so the app shows when an export is being prepared.",
-            "Improved History toolbar layout on iPad by grouping Sort, Export, Import and Compare into a single Actions menu.",
+            "Tidied the iPad History toolbar by grouping Sort, Export, Import and Compare into one Actions menu.",
             "Fixed export reliability using a share-sheet based export flow backed by temporary files.",
-            "Tidied CSV export generation for better long-term efficiency and reduced unnecessary processing overhead.",
-            "Cleaned up remaining file I/O warnings in the SSD benchmark implementation."
+            "Cleaned up CSV export generation so it does less unnecessary work.",
+            "Tidied up SSD benchmark file handling."
         ]
     ),
     AppUpdateEntry(
@@ -581,8 +593,8 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
             "Added CSV export support alongside JSON export.",
             "Updated the Settings tab so the preferred export format can now be set to JSON or CSV.",
             "Extended import support so benchmark history can now be imported from any supported format, including JSON and CSV.",
-            "Improved history portability by allowing the same benchmark records to move between different export/import file types.",
-            "Added different messages for various device thermal levels when running benchmarks."
+            "Made benchmark history easier to move around by supporting both export formats.",
+            "Added clearer messages for different device temperature levels during benchmarks."
         ]
     ),
     AppUpdateEntry(

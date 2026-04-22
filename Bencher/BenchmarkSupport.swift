@@ -147,7 +147,7 @@ enum BenchmarkValidator {
 
         if intensity != "Balanced" {
             reliability = .caution
-            messages.append("This run used \(intensity) mode, so it may not line up as neatly with Bencher's usual side-by-side comparisons.")
+            messages.append("This run used \(intensity) mode, so it does not compare as fairly with Bencher's usual side-by-side comparisons.")
         }
 
         if graphicsBackend != "Metal" {
