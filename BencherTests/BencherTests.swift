@@ -135,17 +135,17 @@ struct BencherTests {
     @Test
     func releaseNotesExposeCurrentBuildEntry() async throws {
         #expect(BencherReleaseNotesEntries.isEmpty == false)
-        #expect(BencherReleaseNotesEntries.first?.version == "V1.10")
+        #expect(BencherReleaseNotesEntries.first?.version == "V1.2")
         #expect(BencherReleaseNotesEntries.filter { $0.releaseDate == "Current Build" }.count == 1)
     }
 
     @Test
     func updateSearchFindsVersionsAndDetails() async throws {
-        let versionMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "1.10")
+        let versionMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "1.2")
         let feedbackMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "feedback icon")
         let graphicsMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "mac cloud graphics")
 
-        #expect(versionMatches.first?.version == "V1.10")
+        #expect(versionMatches.first?.version == "V1.2")
         #expect(feedbackMatches.contains { $0.version == "V1.01" })
         #expect(graphicsMatches.first?.version == "V1.02")
     }

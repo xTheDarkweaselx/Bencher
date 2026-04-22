@@ -16,9 +16,20 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
+        version: "V1.2",
+        title: "Comparison+ Pro Max Ultra",
+        releaseDate: "Current Build",
+        changes: [
+            "Updated comparison results so changes are easier to read, with clearer wording for same-device history and device-to-device comparisons.",
+            "Added a simple Flip control at the top of the comparison view so you can quickly switch which result is treated as the starting point.",
+            "Refreshed the built-in reference ranges to better match Bencher's current scoring scale across iPhone, iPad and Mac.",
+            "Adjusted comparison cards on smaller screens so they fit more naturally without forcing the page wider than the display."
+        ]
+    ),
+    AppUpdateEntry(
         version: "V1.11",
         title: "Comparison View Hotfix",
-        releaseDate: "Current Build",
+        releaseDate: "Previous Build",
         changes: [
             "Changed the comparison view from forced as landscape (meaning it shows two results to side by side all the way of the screen) to potrait.",
         ]
@@ -38,7 +49,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V1.02",
         title: "Graphics Path Safety Pass",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Reworked the Metal graphics test so it no longer depends on a separate shader build step, which helps avoid cloud build issues on Mac.",
             "Added a startup graphics self-check so Bencher can confirm the Metal shader path is ready before you rely on it.",
@@ -48,7 +59,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V1.01",
         title: "Updates, Right Where You Need Them More",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Adjusted the updates flow so the release notes move into Settings only on iPhone, while iPad keeps its separate Updates tab.",
             "Kept the popup-style updates browser for iPhone, so checking what changed still feels quick and tidy.",
@@ -58,7 +69,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V1.0",
         title: "Updates, Right Where You Need Them",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Moved release notes into Settings on iPhone and iPad, so they are easier to find without taking up a full tab.",
             "Added a popup-style updates browser on iOS, giving release notes a cleaner in-app home that feels more natural for quick check-ins.",

@@ -4902,94 +4902,180 @@ struct CompareResultsView: View {
     let results: [BenchmarkResult]
     var onClose: (() -> Void)? = nil
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var showsStrongerDeviceFirst: Bool = true
 
     private var left: BenchmarkResult? { results.indices.contains(0) ? results[0] : nil }
     private var right: BenchmarkResult? { results.indices.contains(1) ? results[1] : nil }
 
+    private var olderResult: BenchmarkResult? {
+        guard let left, let right else { return left ?? right }
+        return left.timestamp <= right.timestamp ? left : right
+    }
+
+    private var newerResult: BenchmarkResult? {
+        guard let left, let right else { return left ?? right }
+        return left.timestamp <= right.timestamp ? right : left
+    }
+
+    private var isSameDeviceComparison: Bool {
+        guard let left, let right else { return true }
+        return left.deviceName == right.deviceName
+    }
+
+    private var strongerDeviceResult: BenchmarkResult? {
+        guard let left, let right else { return left ?? right }
+        if left.overallScore == right.overallScore {
+            return left.timestamp >= right.timestamp ? left : right
+        }
+        return left.overallScore > right.overallScore ? left : right
+    }
+
+    private var lowerScoringDeviceResult: BenchmarkResult? {
+        guard let left, let right else { return left ?? right }
+        if left.overallScore == right.overallScore {
+            return left.timestamp < right.timestamp ? left : right
+        }
+        return left.overallScore > right.overallScore ? right : left
+    }
+
+    private var baselineResult: BenchmarkResult? {
+        if isSameDeviceComparison {
+            return showsStrongerDeviceFirst ? olderResult : newerResult
+        }
+
+        return showsStrongerDeviceFirst ? lowerScoringDeviceResult : strongerDeviceResult
+    }
+
+    private var comparisonResult: BenchmarkResult? {
+        if isSameDeviceComparison {
+            return showsStrongerDeviceFirst ? newerResult : olderResult
+        }
+
+        return showsStrongerDeviceFirst ? strongerDeviceResult : lowerScoringDeviceResult
+    }
+
     private var usesCompactComparisonLayout: Bool {
         horizontalSizeClass == .compact
     }
+
+    private var comparisonPerspectiveID: String {
+        if isSameDeviceComparison {
+            return showsStrongerDeviceFirst ? "older-newer" : "newer-older"
+        }
+
+        return showsStrongerDeviceFirst ? "stronger-first" : "lower-score-first"
+    }
+
+    private var shouldShowPerspectiveToggle: Bool {
+        results.count == 2
+    }
     
     private var winnerSummary: String {
-        guard let left, let right else { return "" }
-        if left.overallScore == right.overallScore {
-            return "These two runs are effectively tied overall."
+        guard let baselineResult, let comparisonResult else { return "" }
+        let delta = comparisonResult.overallScore - baselineResult.overallScore
+        let percentage = baselineResult.overallScore > 0 ? (delta / baselineResult.overallScore) * 100.0 : 0
+
+        if isSameDeviceComparison {
+            if delta == 0 {
+                return "\(comparisonMetricLabel) is tied with \(baselineMetricLabel) overall."
+            }
+
+            let direction = delta > 0 ? "up" : "down"
+            return "\(comparisonMetricLabel) is \(direction) by \(String(format: "%.0f", abs(delta))) points (\(String(format: "%.1f", abs(percentage)))%) compared with \(baselineMetricLabel)."
         }
-        let winner = left.overallScore > right.overallScore ? left : right
-        let loser = left.overallScore > right.overallScore ? right : left
-        let delta = winner.overallScore - loser.overallScore
-        let percentage = loser.overallScore > 0 ? (delta / loser.overallScore) * 100.0 : 0
-        return "\(winner.deviceName) is ahead overall by \(String(format: "%.0f", delta)) points (\(String(format: "%.1f", percentage))%)."
-    }
-    
-    private var leftWinCount: Int {
-        guard let left, let right else { return 0 }
 
-        let comparisons: [(Double, Double)] = [
-            (left.singleCoreScore, right.singleCoreScore),
-            (left.cpuScore, right.cpuScore),
-            (left.memoryScore, right.memoryScore),
-            (left.ssdScore, right.ssdScore),
-            (left.graphicsScore, right.graphicsScore),
-            (left.overallScore, right.overallScore)
-        ]
+        if delta == 0 {
+            return "\(comparisonResult.deviceName) and \(baselineResult.deviceName) are tied overall."
+        }
 
-        return comparisons.filter { $0.0 > $0.1 }.count
+        let direction = delta > 0 ? "ahead of" : "behind"
+        return "\(comparisonResult.deviceName) is \(direction) \(baselineResult.deviceName) by \(String(format: "%.0f", abs(delta))) points (\(String(format: "%.1f", abs(percentage)))%)."
     }
 
-    private var rightWinCount: Int {
-        guard let left, let right else { return 0 }
+    private var summaryGradient: LinearGradient {
+        let improved = (comparisonResult?.overallScore ?? 0) >= (baselineResult?.overallScore ?? 0)
+        return LinearGradient(
+            colors: improved ? [.green.opacity(0.85), .blue.opacity(0.85)] : [.red.opacity(0.85), .orange.opacity(0.85)],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
+    private var comparisonWinCount: Int {
+        guard let baselineResult, let comparisonResult else { return 0 }
 
         let comparisons: [(Double, Double)] = [
-            (left.singleCoreScore, right.singleCoreScore),
-            (left.cpuScore, right.cpuScore),
-            (left.memoryScore, right.memoryScore),
-            (left.ssdScore, right.ssdScore),
-            (left.graphicsScore, right.graphicsScore),
-            (left.overallScore, right.overallScore)
+            (baselineResult.singleCoreScore, comparisonResult.singleCoreScore),
+            (baselineResult.cpuScore, comparisonResult.cpuScore),
+            (baselineResult.memoryScore, comparisonResult.memoryScore),
+            (baselineResult.ssdScore, comparisonResult.ssdScore),
+            (baselineResult.graphicsScore, comparisonResult.graphicsScore),
+            (baselineResult.overallScore, comparisonResult.overallScore)
         ]
 
         return comparisons.filter { $0.1 > $0.0 }.count
     }
 
-    private var leftDisplayName: String {
-        guard let left else { return "Run A" }
-        if leftWinCount > rightWinCount {
-            return "👑 \(left.deviceName)"
-        }
-        return left.deviceName
+    private var baselineWinCount: Int {
+        guard let baselineResult, let comparisonResult else { return 0 }
+
+        let comparisons: [(Double, Double)] = [
+            (baselineResult.singleCoreScore, comparisonResult.singleCoreScore),
+            (baselineResult.cpuScore, comparisonResult.cpuScore),
+            (baselineResult.memoryScore, comparisonResult.memoryScore),
+            (baselineResult.ssdScore, comparisonResult.ssdScore),
+            (baselineResult.graphicsScore, comparisonResult.graphicsScore),
+            (baselineResult.overallScore, comparisonResult.overallScore)
+        ]
+
+        return comparisons.filter { $0.0 > $0.1 }.count
     }
 
-    private var rightDisplayName: String {
-        guard let right else { return "Run B" }
-        if rightWinCount > leftWinCount {
-            return "👑 \(right.deviceName)"
+    private var olderDisplayName: String {
+        guard let olderResult else { return "Older Run" }
+        return "Older: \(olderResult.deviceName)"
+    }
+
+    private var newerDisplayName: String {
+        guard let newerResult else { return "Newer Run" }
+        return "Newer: \(newerResult.deviceName)"
+    }
+
+    private var baselineMetricLabel: String {
+        guard let baselineResult else { return isSameDeviceComparison ? "Older" : "Baseline" }
+        if isSameDeviceComparison {
+            return baselineResult.id == olderResult?.id ? "Older" : "Newer"
         }
-        return right.deviceName
+        return baselineResult.deviceName
+    }
+
+    private var comparisonMetricLabel: String {
+        guard let comparisonResult else { return isSameDeviceComparison ? "Newer" : "Comparison" }
+        if isSameDeviceComparison {
+            return comparisonResult.id == newerResult?.id ? "Newer" : "Older"
+        }
+        return comparisonResult.deviceName
     }
     
     private var categorySummary: String {
-        guard let left, let right else { return "" }
-
-        let comparisons: [(Double, Double)] = [
-            (left.singleCoreScore, right.singleCoreScore),
-            (left.cpuScore, right.cpuScore),
-            (left.memoryScore, right.memoryScore),
-            (left.ssdScore, right.ssdScore),
-            (left.graphicsScore, right.graphicsScore),
-            (left.overallScore, right.overallScore)
-        ]
-
-        let leftWins = comparisons.filter { $0.0 > $0.1 }.count
-        let rightWins = comparisons.filter { $0.1 > $0.0 }.count
-
-        if leftWins == rightWins {
+        if comparisonWinCount == baselineWinCount {
             return "Both runs are evenly matched across the main categories."
         }
 
-        let winnerName = leftWins > rightWins ? left.deviceName : right.deviceName
-        let winnerCount = max(leftWins, rightWins)
-        return "\(winnerName) leads in \(winnerCount) of 6 main categories."
+        if isSameDeviceComparison {
+            if comparisonWinCount > baselineWinCount {
+                return "\(comparisonMetricLabel) leads \(baselineMetricLabel) in \(comparisonWinCount) of 6 main categories."
+            }
+
+            return "\(comparisonMetricLabel) trails \(baselineMetricLabel) in \(baselineWinCount) of 6 main categories."
+        }
+
+        guard let comparisonResult, let baselineResult else { return "" }
+        if comparisonWinCount > baselineWinCount {
+            return "\(comparisonResult.deviceName) leads \(baselineResult.deviceName) in \(comparisonWinCount) of 6 main categories."
+        }
+
+        return "\(comparisonResult.deviceName) trails \(baselineResult.deviceName) in \(baselineWinCount) of 6 main categories."
     }
 
     private var comparisonWarningText: String? {
@@ -4999,11 +5085,19 @@ struct CompareResultsView: View {
 
     private func displayName(for result: BenchmarkResult) -> String {
         guard results.count == 2 else { return result.deviceName }
-        if result.id == results[0].id {
-            return leftDisplayName
+        if !isSameDeviceComparison {
+            if result.id == strongerDeviceResult?.id {
+                return "Stronger: \(result.deviceName)"
+            }
+            if result.id == lowerScoringDeviceResult?.id {
+                return "Lower score: \(result.deviceName)"
+            }
         }
-        if result.id == results[1].id {
-            return rightDisplayName
+        if result.id == olderResult?.id {
+            return olderDisplayName
+        }
+        if result.id == newerResult?.id {
+            return newerDisplayName
         }
         return result.deviceName
     }
@@ -5026,6 +5120,8 @@ struct CompareResultsView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
+
+                perspectiveControlCard
                 
                 if !winnerSummary.isEmpty {
                     Text(winnerSummary)
@@ -5033,13 +5129,7 @@ struct CompareResultsView: View {
                         .foregroundColor(.white)
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            LinearGradient(
-                                colors: [.green.opacity(0.85), .blue.opacity(0.85)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        .background(summaryGradient)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
                 
@@ -5088,28 +5178,27 @@ struct CompareResultsView: View {
                     .buttonStyle(.plain)
                 }
 
-                if let left, let right {
-                    if usesCompactComparisonLayout {
-                        VStack(alignment: .leading, spacing: 12) {
-                            comparisonHeader(for: left)
-                            comparisonHeader(for: right)
+                if let baselineResult, let comparisonResult {
+                    VStack(alignment: .leading, spacing: 20) {
+                        if usesCompactComparisonLayout {
+                            VStack(alignment: .leading, spacing: 12) {
+                                comparisonHeader(for: baselineResult)
+                                comparisonHeader(for: comparisonResult)
+                            }
+                        } else {
+                            HStack(alignment: .top, spacing: 16) {
+                                comparisonHeader(for: baselineResult)
+                                comparisonHeader(for: comparisonResult)
+                            }
                         }
-                    } else {
-                        HStack(alignment: .top, spacing: 16) {
-                            comparisonHeader(for: left)
-                            comparisonHeader(for: right)
-                        }
-                    }
 
-                    ComparisonMetricRow(title: "Overall", leftValue: left.overallScore, rightValue: right.overallScore)
-                    ComparisonMetricRow(title: "Single-Core", leftValue: left.singleCoreScore, rightValue: right.singleCoreScore)
-                    ComparisonMetricRow(title: "Multi-Core", leftValue: left.cpuScore, rightValue: right.cpuScore)
-                    ComparisonMetricRow(title: "Memory", leftValue: left.memoryScore, rightValue: right.memoryScore)
-                    ComparisonMetricRow(title: "SSD", leftValue: left.ssdScore, rightValue: right.ssdScore)
-                    ComparisonMetricRow(title: "Graphics", leftValue: left.graphicsScore, rightValue: right.graphicsScore)
-                    ComparisonMetricRow(title: "RAM Raw MB/s", leftValue: left.memoryRawThroughputMBps, rightValue: right.memoryRawThroughputMBps)
-                    ComparisonMetricRow(title: "SSD Raw Read MB/s", leftValue: left.ssdRawReadMBps, rightValue: right.ssdRawReadMBps)
-                    ComparisonMetricRow(title: "SSD Raw Write MB/s", leftValue: left.ssdRawWriteMBps, rightValue: right.ssdRawWriteMBps)
+                        comparisonMetrics(for: baselineResult, against: comparisonResult)
+                    }
+                    .id(comparisonPerspectiveID)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.98)),
+                        removal: .opacity.combined(with: .scale(scale: 1.02))
+                    ))
                 } else {
                     VStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle")
@@ -5131,6 +5220,69 @@ struct CompareResultsView: View {
             .padding()
         }
         .bencherInlineTitleDisplayMode()
+        .animation(.snappy(duration: 0.28), value: showsStrongerDeviceFirst)
+    }
+
+    private var perspectiveControlCard: some View {
+        HStack(spacing: 12) {
+            Text("Perspective")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+
+            perspectiveButton
+
+            Text(perspectiveDescription)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var perspectiveButton: some View {
+        Button {
+            flipComparisonPerspective()
+        } label: {
+            Label("Flip", systemImage: "arrow.left.arrow.right")
+                .font(.subheadline.weight(.semibold))
+        }
+        .accessibilityLabel(perspectiveButtonTitle)
+        .bencherGlassComparisonButton()
+    }
+
+    private var perspectiveDescription: String {
+        if isSameDeviceComparison {
+            return showsStrongerDeviceFirst ? "Showing the newer run against the older run." : "Showing the older run against the newer run."
+        }
+
+        return showsStrongerDeviceFirst ? "Showing the stronger device against the lower score." : "Showing the lower score against the stronger device."
+    }
+
+    private var perspectiveButtonTitle: String {
+        if isSameDeviceComparison {
+            return showsStrongerDeviceFirst ? "Flip to older run first" : "Flip to newer run first"
+        }
+
+        return showsStrongerDeviceFirst ? "Flip to lower score first" : "Flip to stronger score first"
+    }
+
+    private func flipComparisonPerspective() {
+        withAnimation(.snappy(duration: 0.28)) {
+            showsStrongerDeviceFirst.toggle()
+        }
+    }
+
+    @ViewBuilder
+    private func comparisonMetrics(for baseline: BenchmarkResult, against comparison: BenchmarkResult) -> some View {
+        ComparisonMetricRow(title: "Overall", olderLabel: baselineMetricLabel, newerLabel: comparisonMetricLabel, olderValue: baseline.overallScore, newerValue: comparison.overallScore)
+        ComparisonMetricRow(title: "Single-Core", olderLabel: baselineMetricLabel, newerLabel: comparisonMetricLabel, olderValue: baseline.singleCoreScore, newerValue: comparison.singleCoreScore)
+        ComparisonMetricRow(title: "Multi-Core", olderLabel: baselineMetricLabel, newerLabel: comparisonMetricLabel, olderValue: baseline.cpuScore, newerValue: comparison.cpuScore)
+        ComparisonMetricRow(title: "Memory", olderLabel: baselineMetricLabel, newerLabel: comparisonMetricLabel, olderValue: baseline.memoryScore, newerValue: comparison.memoryScore)
+        ComparisonMetricRow(title: "SSD", olderLabel: baselineMetricLabel, newerLabel: comparisonMetricLabel, olderValue: baseline.ssdScore, newerValue: comparison.ssdScore)
+        ComparisonMetricRow(title: "Graphics", olderLabel: baselineMetricLabel, newerLabel: comparisonMetricLabel, olderValue: baseline.graphicsScore, newerValue: comparison.graphicsScore)
+        ComparisonMetricRow(title: "RAM Raw MB/s", olderLabel: baselineMetricLabel, newerLabel: comparisonMetricLabel, olderValue: baseline.memoryRawThroughputMBps, newerValue: comparison.memoryRawThroughputMBps)
+        ComparisonMetricRow(title: "SSD Raw Read MB/s", olderLabel: baselineMetricLabel, newerLabel: comparisonMetricLabel, olderValue: baseline.ssdRawReadMBps, newerValue: comparison.ssdRawReadMBps)
+        ComparisonMetricRow(title: "SSD Raw Write MB/s", olderLabel: baselineMetricLabel, newerLabel: comparisonMetricLabel, olderValue: baseline.ssdRawWriteMBps, newerValue: comparison.ssdRawWriteMBps)
     }
 
     @ViewBuilder
@@ -5227,8 +5379,10 @@ struct CompareResultsView: View {
 
 struct ComparisonMetricRow: View {
     let title: String
-    let leftValue: Double
-    let rightValue: Double
+    let olderLabel: String
+    let newerLabel: String
+    let olderValue: Double
+    let newerValue: Double
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var usesCompactLayout: Bool {
@@ -5236,7 +5390,11 @@ struct ComparisonMetricRow: View {
     }
     
     private var delta: Double {
-        rightValue - leftValue
+        newerValue - olderValue
+    }
+
+    private var deltaColor: Color {
+        delta >= 0 ? .green : .red
     }
     
     var body: some View {
@@ -5253,19 +5411,19 @@ struct ComparisonMetricRow: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(delta >= 0 ? Color.green : Color.red)
+                    .background(deltaColor)
                     .clipShape(Capsule())
             }
             
             if usesCompactLayout {
                 VStack(alignment: .leading, spacing: 10) {
-                    comparisonValueCard(label: "Run A", value: leftValue, color: .blue, isWinner: leftValue > rightValue)
-                    comparisonValueCard(label: "Run B", value: rightValue, color: .purple, isWinner: rightValue > leftValue)
+                    comparisonValueCard(label: olderLabel, value: olderValue, color: .blue, isWinner: olderValue > newerValue)
+                    comparisonValueCard(label: newerLabel, value: newerValue, color: .purple, isWinner: newerValue > olderValue)
                 }
             } else {
                 HStack(alignment: .center, spacing: 16) {
-                    comparisonValueCard(label: "Run A", value: leftValue, color: .blue, isWinner: leftValue > rightValue)
-                    comparisonValueCard(label: "Run B", value: rightValue, color: .purple, isWinner: rightValue > leftValue)
+                    comparisonValueCard(label: olderLabel, value: olderValue, color: .blue, isWinner: olderValue > newerValue)
+                    comparisonValueCard(label: newerLabel, value: newerValue, color: .purple, isWinner: newerValue > olderValue)
                 }
             }
         }
@@ -5291,6 +5449,8 @@ struct ComparisonMetricRow: View {
             Text(label)
                 .font(.caption)
                 .foregroundColor(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             HStack(spacing: 6) {
                 Text(String(format: "%.0f", value))
                     .font(.title3.weight(.bold))
@@ -5314,8 +5474,29 @@ struct ComparisonMetricRow: View {
     
     private var deltaText: String {
         let sign = delta >= 0 ? "+" : ""
-        let baseline = leftValue == 0 ? 0 : (delta / leftValue) * 100.0
-        return "\(sign)\(String(format: "%.0f", delta)) · \(String(format: "%.1f", baseline))%"
+        let baseline = olderValue == 0 ? 0 : (delta / olderValue) * 100.0
+        return "\(sign)\(String(format: "%.0f", delta)) · \(sign)\(String(format: "%.1f", baseline))%"
+    }
+}
+
+private struct BencherGlassComparisonButtonModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            content
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+        } else {
+            content
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+        }
+    }
+}
+
+private extension View {
+    func bencherGlassComparisonButton() -> some View {
+        modifier(BencherGlassComparisonButtonModifier())
     }
 }
 
@@ -6859,29 +7040,29 @@ struct ReferenceDevicesView: View {
         ReferenceSection(
             title: "iPhone",
             rows: [
-                ReferenceEntry(name: "iPhone 12", rangeText: "~300 to 430 overall", lowerBound: 300, upperBound: 430),
-                ReferenceEntry(name: "iPhone 13 Pro Max", rangeText: "~430 to 560 overall", lowerBound: 430, upperBound: 560),
-                ReferenceEntry(name: "iPhone 14 Pro Max", rangeText: "~520 to 650 overall", lowerBound: 520, upperBound: 650),
-                ReferenceEntry(name: "Recent Pro iPhone", rangeText: "~550 to 760 overall", lowerBound: 550, upperBound: 760),
-                ReferenceEntry(name: "Recent Pro Max iPhone", rangeText: "~700 to 950 overall", lowerBound: 700, upperBound: 950)
+                ReferenceEntry(name: "iPhone 12", rangeText: "~450 to 650 overall", lowerBound: 450, upperBound: 650),
+                ReferenceEntry(name: "iPhone 13 Pro Max", rangeText: "~650 to 850 overall", lowerBound: 650, upperBound: 850),
+                ReferenceEntry(name: "iPhone 14 Pro Max", rangeText: "~780 to 1000 overall", lowerBound: 780, upperBound: 1000),
+                ReferenceEntry(name: "Recent Pro iPhone", rangeText: "~950 to 1250 overall", lowerBound: 950, upperBound: 1250),
+                ReferenceEntry(name: "Recent Pro Max iPhone", rangeText: "~1150 to 1450 overall", lowerBound: 1150, upperBound: 1450)
             ]
         ),
         ReferenceSection(
             title: "iPad",
             rows: [
-                ReferenceEntry(name: "iPad mini / standard iPad", rangeText: "~350 to 520 overall", lowerBound: 350, upperBound: 520),
-                ReferenceEntry(name: "iPad Air", rangeText: "~450 to 650 overall", lowerBound: 450, upperBound: 650),
-                ReferenceEntry(name: "iPad Pro 11/13-inch (M1)", rangeText: "~620 to 760 overall", lowerBound: 620, upperBound: 760),
-                ReferenceEntry(name: "iPad Pro 11/13-inch (M2/M3)", rangeText: "~700 to 1000 overall", lowerBound: 700, upperBound: 1000),
-                ReferenceEntry(name: "iPad Pro 11/13-inch (M4)", rangeText: "~1000 to 1350 overall", lowerBound: 1000, upperBound: 1350)
+                ReferenceEntry(name: "iPad mini / standard iPad", rangeText: "~550 to 820 overall", lowerBound: 550, upperBound: 820),
+                ReferenceEntry(name: "iPad Air", rangeText: "~700 to 1050 overall", lowerBound: 700, upperBound: 1050),
+                ReferenceEntry(name: "iPad Pro 11/13-inch (M1)", rangeText: "~980 to 1250 overall", lowerBound: 980, upperBound: 1250),
+                ReferenceEntry(name: "iPad Pro 11/13-inch (M2/M3)", rangeText: "~1150 to 1650 overall", lowerBound: 1150, upperBound: 1650),
+                ReferenceEntry(name: "iPad Pro 11/13-inch (M4)", rangeText: "~1800 to 2200 overall", lowerBound: 1800, upperBound: 2200)
             ]
         ),
         ReferenceSection(
             title: "Mac",
             rows: [
-                ReferenceEntry(name: "MacBook Air M1/M2", rangeText: "~750 to 1000 overall", lowerBound: 750, upperBound: 1000),
-                ReferenceEntry(name: "MacBook Pro / Mac mini M-class", rangeText: "~850 to 1150 overall", lowerBound: 850, upperBound: 1150),
-                ReferenceEntry(name: "High-end Apple silicon Mac", rangeText: "~1000+ overall", lowerBound: 1000, upperBound: nil)
+                ReferenceEntry(name: "MacBook Air M1/M2", rangeText: "~1150 to 1650 overall", lowerBound: 1150, upperBound: 1650),
+                ReferenceEntry(name: "MacBook Pro / Mac mini M-class", rangeText: "~1450 to 2200 overall", lowerBound: 1450, upperBound: 2200),
+                ReferenceEntry(name: "High-end Apple silicon Mac", rangeText: "~2100+ overall", lowerBound: 2100, upperBound: nil)
             ]
         )
     ]
