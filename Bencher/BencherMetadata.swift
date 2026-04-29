@@ -16,9 +16,17 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
+        version: "V1.31",
+        title: "MacOS Release Version",
+        releaseDate: "Current Build",
+        changes: [
+            "Reduced permission requirements on Bencher in-line with the iOS app.",
+        ]
+    ),
+    AppUpdateEntry(
         version: "V1.30",
         title: "Release Version Polish",
-        releaseDate: "Current Build",
+        releaseDate: "Previous Build",
         changes: [
             "Polished older update notes so the release history reads more naturally and feels less like internal development notes.",
             "Cleaned up wording around older Mac, iCloud, History, Trends, Reference and export changes while keeping the original update titles intact.",
