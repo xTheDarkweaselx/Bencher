@@ -422,6 +422,7 @@ struct BenchmarkView: View {
     @State private var overallProgress: Double = 0.0
     @State private var taskProgress: Double = 0.0
     @State private var benchmarkTask: DispatchWorkItem?
+    @State private var activeBenchmarkRunID: UUID? = nil
 
     var body: some View {
         ZStack {
@@ -826,10 +827,23 @@ struct BenchmarkView: View {
     }
 
     func runBenchmark() {
+        benchmarkTask?.cancel()
+        let runID = UUID()
+        activeBenchmarkRunID = runID
         isRunning = true
         benchmarkComplete = false
         benchmarkFailedMessage = nil
         benchmarkValidationSummary = nil
+        singleCoreScore = nil
+        cpuScore = nil
+        memoryScore = nil
+        memoryRawThroughputMBps = nil
+        ssdScore = nil
+        ssdRawCombinedMBps = nil
+        ssdRawReadMBps = nil
+        ssdRawWriteMBps = nil
+        graphicsScore = nil
+        overallScore = nil
         progressMessage = "Starting benchmark..."
         overallProgress = 0.0
         taskProgress = 0.0
@@ -840,12 +854,14 @@ struct BenchmarkView: View {
             
             // Single-Core Benchmark
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 progressMessage = "Running Single-Core benchmark..."
                 taskProgress = 0.0
             }
             for step in 1...10 {
                 if workItem.isCancelled { return }
                 DispatchQueue.main.async {
+                    guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                     taskProgress = Double(step) / 10.0
                 }
                 usleep(120_000)
@@ -855,6 +871,7 @@ struct BenchmarkView: View {
                 benchmark.measureSingleCoreBenchmark()
             }
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 singleCoreScore = singleCoreResult.rounded()
                 taskProgress = 1.0
                 overallProgress = 0.20
@@ -862,12 +879,14 @@ struct BenchmarkView: View {
 
             // Multi-Core Benchmark
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 progressMessage = "Running Multi-Core benchmark..."
                 taskProgress = 0.0
             }
             for step in 1...10 {
                 if workItem.isCancelled { return }
                 DispatchQueue.main.async {
+                    guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                     taskProgress = Double(step) / 10.0
                 }
                 usleep(120_000)
@@ -877,6 +896,7 @@ struct BenchmarkView: View {
                 benchmark.measureCPUBenchmark()
             }
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 cpuScore = cpuResult.rounded()
                 taskProgress = 1.0
                 overallProgress = 0.40
@@ -884,12 +904,14 @@ struct BenchmarkView: View {
 
             // Memory Benchmark
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 progressMessage = "Running Memory benchmark..."
                 taskProgress = 0.0
             }
             for step in 1...10 {
                 if workItem.isCancelled { return }
                 DispatchQueue.main.async {
+                    guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                     taskProgress = Double(step) / 10.0
                 }
                 usleep(90_000)
@@ -899,6 +921,7 @@ struct BenchmarkView: View {
                 benchmark.measureMemoryBenchmark()
             }
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 memoryScore = calibratedScore(title: "Memory Score", rawScore: memoryResult.score)
                 memoryRawThroughputMBps = memoryResult.throughputMBps.rounded()
                 taskProgress = 1.0
@@ -907,12 +930,14 @@ struct BenchmarkView: View {
 
             // SSD Benchmark
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 progressMessage = "Running SSD benchmark..."
                 taskProgress = 0.0
             }
             for step in 1...10 {
                 if workItem.isCancelled { return }
                 DispatchQueue.main.async {
+                    guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                     taskProgress = Double(step) / 10.0
                 }
                 usleep(70_000)
@@ -922,6 +947,7 @@ struct BenchmarkView: View {
                 benchmark.measureSSDSpeed()
             }
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 ssdScore = calibratedScore(title: "SSD Speed Score", rawScore: ssdResult.score)
                 ssdRawCombinedMBps = ssdResult.combinedMBps.rounded()
                 ssdRawReadMBps = ssdResult.readMBps.rounded()
@@ -932,12 +958,14 @@ struct BenchmarkView: View {
 
             // Graphics Benchmark
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 progressMessage = "Running Graphics benchmark..."
                 taskProgress = 0.0
             }
             for step in 1...10 {
                 if workItem.isCancelled { return }
                 DispatchQueue.main.async {
+                    guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                     taskProgress = Double(step) / 10.0
                 }
                 usleep(70_000)
@@ -947,7 +975,10 @@ struct BenchmarkView: View {
                 benchmark.measureGraphicsRendering()
             }
 
+            guard !workItem.isCancelled else { return }
+
             DispatchQueue.main.async {
+                guard activeBenchmarkRunID == runID, !workItem.isCancelled else { return }
                 let rawMetrics = BenchmarkRawMetrics(
                     singleCore: singleCoreResult,
                     multiCore: cpuResult,
@@ -990,6 +1021,8 @@ struct BenchmarkView: View {
                 overallProgress = 1.0
                 progressMessage = validation.shouldSave ? "Benchmark complete!" : "Benchmark finished, but this run was not saved."
                 isRunning = false
+                benchmarkTask = nil
+                activeBenchmarkRunID = nil
                 benchmarkComplete = true
                 benchmarkFailedMessage = validation.shouldSave ? nil : validation.primaryMessage
                 if validation.shouldSave {
@@ -1100,16 +1133,30 @@ struct BenchmarkView: View {
 
     func cancelBenchmark() {
         benchmarkTask?.cancel()
+        benchmarkTask = nil
+        activeBenchmarkRunID = nil
         isRunning = false
         benchmarkComplete = false
         benchmarkFailedMessage = nil
         benchmarkValidationSummary = nil
-        progressMessage = "Benchmark cancelled."
+        singleCoreScore = nil
+        cpuScore = nil
+        memoryScore = nil
+        memoryRawThroughputMBps = nil
+        ssdScore = nil
+        ssdRawCombinedMBps = nil
+        ssdRawReadMBps = nil
+        ssdRawWriteMBps = nil
+        graphicsScore = nil
+        overallScore = nil
+        progressMessage = "Ready to benchmark!"
         overallProgress = 0.0
         taskProgress = 0.0
     }
 
     func acknowledgeBenchmarkCompletion() {
+        benchmarkTask = nil
+        activeBenchmarkRunID = nil
         singleCoreScore = nil
         cpuScore = nil
         memoryScore = nil
@@ -1244,6 +1291,7 @@ struct HistoryView: View {
     @State private var historyFilterScrollIndex: Int = 0
     @State private var isShowingDeleteAllConfirmation: Bool = false
     @State private var isShowingMultiDeleteSheet: Bool = false
+    @State private var isShowingLeaderboard: Bool = false
     @State private var recentlyDeletedResults: [BenchmarkResult] = []
     @State private var isShowingMetadataEditor: Bool = false
     @State private var draftNote: String = ""
@@ -1363,6 +1411,36 @@ struct HistoryView: View {
 
                     isShowingMultiDeleteSheet = false
                 }
+            }
+            .sheet(isPresented: $isShowingLeaderboard) {
+                NavigationStack {
+                    LeaderboardView(
+                        scores: scores,
+                        onClose: {
+                            isShowingLeaderboard = false
+                        }
+                    ) { result in
+                        selectedResultID = result.id
+                        isShowingLeaderboard = false
+
+                        if usesModalHistoryDetail {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                compactPresentedResult = result
+                            }
+                        }
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .bencherTopBarTrailing) {
+                            Button("Done") {
+                                isShowingLeaderboard = false
+                            }
+                        }
+                    }
+                }
+                #if os(macOS)
+                .frame(minWidth: 460, idealWidth: 560, maxWidth: 640, minHeight: 520, idealHeight: 620, maxHeight: 700)
+                .padding(14)
+                #endif
             }
             .fileExporter(
                 isPresented: $isShowingExporter,
@@ -1633,6 +1711,24 @@ struct HistoryView: View {
                     .disabled(sortedScores.isEmpty || isPreparingExport)
                 }
                 .padding(.top, horizontalSizeClass == .compact ? 0 : 4)
+
+                Button {
+                    isShowingLeaderboard = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "trophy.fill")
+                            .font(.headline)
+                        Text("Leaderboard")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 0)
+                        Text("Top 10")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+                .disabled(sortedScores.isEmpty)
 
                 Picker("Sort", selection: $sortOption) {
                     ForEach(HistorySortOption.allCases) { option in
@@ -2480,6 +2576,209 @@ struct HistoryView: View {
         Text("\(title) \(String(format: "%.0f", value))")
             .font(.caption.weight(.semibold))
             .foregroundColor(.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.thinMaterial)
+            .overlay(
+                Capsule()
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .clipShape(Capsule())
+    }
+}
+
+// MARK: - Leaderboard View
+struct LeaderboardView: View {
+    let scores: [BenchmarkResult]
+    let onClose: () -> Void
+    let onSelect: (BenchmarkResult) -> Void
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var topResults: [BenchmarkResult] {
+        Array(
+            scores
+                .sorted {
+                    if $0.overallScore == $1.overallScore {
+                        return $0.timestamp > $1.timestamp
+                    }
+                    return $0.overallScore > $1.overallScore
+                }
+                .prefix(10)
+        )
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                leaderboardHeader
+
+                if topResults.isEmpty {
+                    leaderboardEmptyState
+                } else {
+                    VStack(spacing: 12) {
+                        ForEach(Array(topResults.enumerated()), id: \.element.id) { index, result in
+                            Button {
+                                onSelect(result)
+                            } label: {
+                                leaderboardRow(rank: index + 1, result: result)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Leaderboard")
+        .bencherInlineTitleDisplayMode()
+    }
+
+    private var leaderboardHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.orange.opacity(0.16))
+                        .frame(width: 48, height: 48)
+                    Image(systemName: "trophy.fill")
+                        .font(.title2.weight(.semibold))
+                        .foregroundColor(.orange)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Top 10 Results")
+                        .font(.title2.bold())
+                    Text("Ranked by highest overall score across your saved benchmark history.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                #if os(macOS)
+                Button(action: onClose) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.headline)
+                        Text("Close")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.thinMaterial)
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+                    )
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                #endif
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(cornerRadius: 18)
+    }
+
+    private var leaderboardEmptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "trophy")
+                .font(.system(size: 38))
+                .foregroundColor(.secondary)
+            Text("No benchmark results yet")
+                .font(.headline)
+            Text("Run a benchmark to start building your leaderboard.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .glassCard(cornerRadius: 18)
+    }
+
+    private func leaderboardRow(rank: Int, result: BenchmarkResult) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            rankBadge(rank)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(String(format: "%.0f", result.overallScore))
+                        .font(.system(size: horizontalSizeClass == .compact ? 28 : 32, weight: .bold))
+                        .foregroundColor(.blue)
+
+                    Text("Overall")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+
+                    Spacer(minLength: 0)
+                }
+
+                Text(result.deviceName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+
+                Text(result.timestamp.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        leaderboardMetricPill(title: "SC", value: result.singleCoreScore)
+                        leaderboardMetricPill(title: "MC", value: result.cpuScore)
+                        leaderboardMetricPill(title: "MEM", value: result.memoryScore)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 8) {
+                        leaderboardMetricPill(title: "SSD", value: result.ssdScore)
+                        leaderboardMetricPill(title: "GPU", value: result.graphicsScore)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(cornerRadius: 18)
+    }
+
+    private func rankBadge(_ rank: Int) -> some View {
+        let tint: Color = {
+            switch rank {
+            case 1:
+                return .orange
+            case 2:
+                return .gray
+            case 3:
+                return .brown
+            default:
+                return .blue
+            }
+        }()
+
+        return VStack(spacing: 4) {
+            Image(systemName: rank <= 3 ? "trophy.fill" : "list.number")
+                .font(.caption.weight(.bold))
+            Text("#\(rank)")
+                .font(.caption.weight(.bold))
+        }
+        .foregroundColor(tint)
+        .frame(width: 46, height: 46)
+        .background(tint.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func leaderboardMetricPill(title: String, value: Double) -> some View {
+        Text("\(title) \(String(format: "%.0f", value))")
+            .font(.caption.weight(.semibold))
+            .foregroundColor(.primary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(.thinMaterial)

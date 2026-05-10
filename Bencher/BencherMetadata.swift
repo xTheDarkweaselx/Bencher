@@ -16,9 +16,19 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
+        version: "V1.40",
+        title: "Top Trumps, Top Bumps",
+        releaseDate: "Current Build",
+        changes: [
+            "Added a new top 10 leaderboard showing your best historic benchmarks.",
+            "Improved the Mac leaderboard popup so it stays comfortably within the app window with better padding.",
+            "Fixed benchmark cancellation so cancelled runs reset immediately and no longer only stop after the current part of the test is complete."
+        ]
+    ),
+    AppUpdateEntry(
         version: "V1.31",
         title: "MacOS Release Version",
-        releaseDate: "Current Build",
+        releaseDate: "Previous Build",
         changes: [
             "Reduced permission requirements on Bencher in-line with the iOS app.",
         ]
@@ -38,7 +48,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V1.20",
         title: "Comparison+ Pro Max Ultra",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Updated comparison results so changes are easier to read, with clearer wording for same-device history and device-to-device comparisons.",
             "Added a simple Flip control at the top of the comparison view so you can quickly switch which result is treated as the starting point.",
