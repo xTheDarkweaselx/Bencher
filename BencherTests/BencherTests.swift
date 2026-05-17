@@ -133,19 +133,92 @@ struct BencherTests {
     }
 
     @Test
+    func leaderboardRankingUsesTopTenAndNewestTieBreak() async throws {
+        let baseDate = Date(timeIntervalSince1970: 1_000)
+        let results = (0..<12).map { index in
+            makeResult(
+                id: UUID(),
+                deviceName: "iPhone 17 Pro Max",
+                intensity: "Balanced",
+                graphicsBackend: GraphicsBenchmarkBackend.metal.rawValue,
+                timestamp: baseDate.addingTimeInterval(Double(index)),
+                overallScore: index == 2 ? 900 : Double(700 + index)
+            )
+        }
+        let newestTiedResult = makeResult(
+            id: UUID(uuidString: "55555555-5555-5555-5555-555555555555")!,
+            deviceName: "iPhone 17 Pro Max",
+            intensity: "Balanced",
+            graphicsBackend: GraphicsBenchmarkBackend.metal.rawValue,
+            timestamp: baseDate.addingTimeInterval(500),
+            overallScore: 900
+        )
+
+        let ranked = LeaderboardRanking.topResults(from: results + [newestTiedResult])
+
+        #expect(ranked.count == 10)
+        #expect(ranked.first?.id == newestTiedResult.id)
+        #expect(ranked.dropFirst().first?.overallScore == 900)
+    }
+
+    @Test
+    func leaderboardFiltersByDeviceModeAndGraphicsBackend() async throws {
+        let currentDevice = "Adam's iPad"
+        let currentBalancedMetal = makeResult(
+            id: UUID(uuidString: "66666666-6666-6666-6666-666666666666")!,
+            deviceName: currentDevice,
+            intensity: "Balanced",
+            graphicsBackend: GraphicsBenchmarkBackend.metal.rawValue,
+            timestamp: Date(timeIntervalSince1970: 100),
+            overallScore: 810
+        )
+        let otherDevice = makeResult(
+            id: UUID(uuidString: "77777777-7777-7777-7777-777777777777")!,
+            deviceName: "Mac mini",
+            intensity: "Balanced",
+            graphicsBackend: GraphicsBenchmarkBackend.metal.rawValue,
+            timestamp: Date(timeIntervalSince1970: 200),
+            overallScore: 900
+        )
+        let extremeLegacy = makeResult(
+            id: UUID(uuidString: "88888888-8888-8888-8888-888888888888")!,
+            deviceName: currentDevice,
+            intensity: "Extreme",
+            graphicsBackend: GraphicsBenchmarkBackend.legacy.rawValue,
+            timestamp: Date(timeIntervalSince1970: 300),
+            overallScore: 950
+        )
+        let results = [currentBalancedMetal, otherDevice, extremeLegacy]
+
+        #expect(LeaderboardRanking.topResults(from: results, filter: .currentDevice, currentDeviceName: currentDevice).map(\.id) == [extremeLegacy.id, currentBalancedMetal.id])
+        #expect(LeaderboardRanking.topResults(from: results, filter: .balancedOnly, currentDeviceName: currentDevice).map(\.id) == [otherDevice.id, currentBalancedMetal.id])
+        #expect(LeaderboardRanking.topResults(from: results, filter: .metalOnly, currentDeviceName: currentDevice).map(\.id) == [otherDevice.id, currentBalancedMetal.id])
+    }
+
+    @Test
+    func cancellationStateBrieflyReportsCancelledThenReturnsReady() async throws {
+        #expect(BenchmarkCancellationState.cancelled.progressMessage == "Benchmark cancelled.")
+        #expect(BenchmarkCancellationState.cancelled.overallProgress == 0.0)
+        #expect(BenchmarkCancellationState.cancelled.taskProgress == 0.0)
+        #expect(BenchmarkCancellationState.ready.progressMessage == "Ready to benchmark!")
+        #expect(BenchmarkCancellationState.ready.overallProgress == 0.0)
+        #expect(BenchmarkCancellationState.ready.taskProgress == 0.0)
+    }
+
+    @Test
     func releaseNotesExposeCurrentBuildEntry() async throws {
         #expect(BencherReleaseNotesEntries.isEmpty == false)
-        #expect(BencherReleaseNotesEntries.first?.version == "V1.30")
+        #expect(BencherReleaseNotesEntries.first?.version == "V1.45")
         #expect(BencherReleaseNotesEntries.filter { $0.releaseDate == "Current Build" }.count == 1)
     }
 
     @Test
     func updateSearchFindsVersionsAndDetails() async throws {
-        let versionMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "1.30")
+        let versionMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "1.45")
         let feedbackMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "feedback icon")
         let graphicsMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "mac cloud graphics")
 
-        #expect(versionMatches.first?.version == "V1.30")
+        #expect(versionMatches.first?.version == "V1.45")
         #expect(feedbackMatches.contains { $0.version == "V1.01" })
         #expect(graphicsMatches.first?.version == "V1.02")
     }
@@ -164,7 +237,8 @@ struct BencherTests {
         deviceName: String,
         intensity: String,
         graphicsBackend: String,
-        timestamp: Date
+        timestamp: Date,
+        overallScore: Double = 790
     ) -> BenchmarkResult {
         BenchmarkResult(
             id: id,
@@ -186,7 +260,7 @@ struct BencherTests {
             rawMemoryScore: 160,
             rawSSDScore: 2_000,
             rawGraphicsScore: 6_000,
-            overallScore: 790,
+            overallScore: overallScore,
             timestamp: timestamp,
             thermalState: 0,
             wasConnectedToPower: false,

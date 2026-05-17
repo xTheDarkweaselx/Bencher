@@ -16,9 +16,20 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
+        version: "V1.45",
+        title: "Now With Fewer Vanishing Acts",
+        releaseDate: "Current Build",
+        changes: [
+            "Made leaderboard selections cleaner by briefly highlighting the chosen result after the leaderboard closes on iPadOS/MacOS.",
+            "Added leaderboard filters for all devices, this device, Balanced runs and Metal runs so top scores are easier to compare fairly.",
+            "Improved benchmark cancellation feedback so Bencher shows a short cancellation message before returning to ready state.",
+            "Added a Bottom Tab Bar setting on iPhone and iPad so you can keep the bar visible, let selected pages hide it on scroll, or use a more compact scrolling style where supported.",
+        ]
+    ),
+    AppUpdateEntry(
         version: "V1.40",
         title: "Top Trumps, Top Bumps",
-        releaseDate: "Current Build",
+        releaseDate: "Previous Build",
         changes: [
             "Added a new top 10 leaderboard showing your best historic benchmarks.",
             "Improved the Mac leaderboard popup so it stays comfortably within the app window with better padding.",

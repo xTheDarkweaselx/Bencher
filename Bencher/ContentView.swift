@@ -28,6 +28,46 @@ enum ICloudAccountAvailability {
     }
 }
 
+private enum TabBarDockPreference: String, CaseIterable, Identifiable {
+    case automatic = "Automatic"
+    case alwaysShow = "Always Show"
+    case hideOnScroll = "Hide on Scroll"
+
+    var id: String { rawValue }
+
+    var title: String { rawValue }
+
+    var description: String {
+        switch self {
+        case .automatic:
+            "Keeps Dashboard and Benchmark fully visible, while browsing pages can tuck the dock away as you scroll."
+        case .alwaysShow:
+            "Keeps the bottom tab bar visible everywhere."
+        case .hideOnScroll:
+            "Lets the bottom tab bar tuck away while scrolling where Apple supports it. Benchmark stays fully visible."
+        }
+    }
+
+    static func resolved(from rawValue: String) -> TabBarDockPreference {
+        TabBarDockPreference(rawValue: rawValue) ?? .automatic
+    }
+
+    static func usesMinimisedBar(for preferenceRawValue: String, selectedTab: String) -> Bool {
+        switch resolved(from: preferenceRawValue) {
+        case .automatic:
+            return usesMinimisedBarInAutomaticMode(for: selectedTab)
+        case .alwaysShow:
+            return false
+        case .hideOnScroll:
+            return selectedTab != "benchmark"
+        }
+    }
+
+    static func usesMinimisedBarInAutomaticMode(for tab: String) -> Bool {
+        ["history", "trends", "reference", "settings", "updates"].contains(tab)
+    }
+}
+
 private extension View {
     func iCloudNoAccountAlert(
         isPresented: Binding<Bool>,
@@ -48,6 +88,7 @@ private extension View {
 struct ContentView: View {
     @State private var scores: [BenchmarkResult] = BenchmarkStorage.load()
     @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "Dark"
+    @AppStorage("tabBarDockPreference") private var tabBarDockPreference: String = TabBarDockPreference.automatic.rawValue
     @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
     @AppStorage("icloudNoAccountWarningDismissed") private var iCloudNoAccountWarningDismissed: Bool = false
     @State private var selectedTab: String = "dashboard"
@@ -110,6 +151,94 @@ struct ContentView: View {
             }
         )
         #else
+        iosTabView
+            .preferredColorScheme(preferredColorScheme)
+            .onAppear {
+                guard !hasPreparedStorage else { return }
+                BenchmarkStorage.prepareForLaunch()
+                #if canImport(Metal)
+                BencherGraphicsRuntime.performStartupSelfCheck()
+                #endif
+                scores = BenchmarkStorage.load()
+                hasPreparedStorage = true
+                presentICloudNoAccountAlertIfNeeded()
+            }
+            .onChange(of: iCloudHistorySyncEnabled) { _, isEnabled in
+                if !isEnabled {
+                    iCloudNoAccountWarningDismissed = false
+                }
+                scores = BenchmarkStorage.setICloudSyncEnabled(isEnabled, currentScores: scores)
+                presentICloudNoAccountAlertIfNeeded()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)) { _ in
+                guard iCloudHistorySyncEnabled else { return }
+                scores = BenchmarkStorage.load()
+            }
+            .iCloudNoAccountAlert(
+                isPresented: $isShowingICloudNoAccountAlert,
+                suppressFutureWarnings: {
+                    iCloudNoAccountWarningDismissed = true
+                }
+            )
+        #endif
+    }
+
+    #if !os(macOS)
+    @ViewBuilder
+    private var iosTabView: some View {
+        if #available(iOS 26.0, *) {
+            modernIOSTabView
+        } else {
+            legacyIOSTabView
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private var modernIOSTabView: some View {
+        TabView(selection: $selectedTab) {
+            Tab("Dashboard", systemImage: "square.grid.2x2", value: "dashboard") {
+                DashboardView(scores: scores, selectedTab: $selectedTab, pendingHistoryAction: $pendingHistoryAction)
+            }
+
+            Tab("Benchmark", systemImage: "speedometer", value: "benchmark") {
+                BenchmarkView(scores: $scores)
+            }
+
+            Tab("History", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90", value: "history") {
+                HistoryView(
+                    scores: $scores,
+                    pendingAction: $pendingHistoryAction,
+                    pendingSelectedResultID: $pendingHistorySelection
+                )
+            }
+
+            Tab("Trends", systemImage: "chart.line.uptrend.xyaxis", value: "trends") {
+                TrendsView(
+                    scores: scores,
+                    selectedTab: $selectedTab,
+                    pendingHistorySelection: $pendingHistorySelection
+                )
+            }
+
+            Tab("Reference", systemImage: "iphone.gen3", value: "reference") {
+                ReferenceDevicesView(scores: scores)
+            }
+
+            Tab("Settings", systemImage: "gearshape", value: "settings") {
+                SettingsView(latestResult: scores.sorted(by: { $0.timestamp > $1.timestamp }).first)
+            }
+
+            if !usesSettingsHostedUpdatesOnIOS {
+                Tab("Updates", systemImage: "clock.badge.checkmark", value: "updates") {
+                    UpdatesView()
+                }
+            }
+
+        }
+        .bencherTabBarDockBehavior(tabBarDockPreference, selectedTab: selectedTab)
+    }
+
+    private var legacyIOSTabView: some View {
         TabView(selection: $selectedTab) {
             DashboardView(scores: scores, selectedTab: $selectedTab, pendingHistoryAction: $pendingHistoryAction)
                 .tabItem {
@@ -123,18 +252,26 @@ struct ContentView: View {
                 }
                 .tag("benchmark")
 
-            HistoryView(scores: $scores, pendingAction: $pendingHistoryAction, pendingSelectedResultID: $pendingHistorySelection)
+            HistoryView(
+                scores: $scores,
+                pendingAction: $pendingHistoryAction,
+                pendingSelectedResultID: $pendingHistorySelection
+            )
                 .tabItem {
                     Label("History", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
                 }
                 .tag("history")
 
-            TrendsView(scores: scores, selectedTab: $selectedTab, pendingHistorySelection: $pendingHistorySelection)
+            TrendsView(
+                scores: scores,
+                selectedTab: $selectedTab,
+                pendingHistorySelection: $pendingHistorySelection
+            )
                 .tabItem {
                     Label("Trends", systemImage: "chart.line.uptrend.xyaxis")
                 }
                 .tag("trends")
-            
+
             ReferenceDevicesView(scores: scores)
                 .tabItem {
                     Label("Reference", systemImage: "iphone.gen3")
@@ -155,36 +292,8 @@ struct ContentView: View {
                     .tag("updates")
             }
         }
-        .preferredColorScheme(preferredColorScheme)
-        .onAppear {
-            guard !hasPreparedStorage else { return }
-            BenchmarkStorage.prepareForLaunch()
-            #if canImport(Metal)
-            BencherGraphicsRuntime.performStartupSelfCheck()
-            #endif
-            scores = BenchmarkStorage.load()
-            hasPreparedStorage = true
-            presentICloudNoAccountAlertIfNeeded()
-        }
-        .onChange(of: iCloudHistorySyncEnabled) { _, isEnabled in
-            if !isEnabled {
-                iCloudNoAccountWarningDismissed = false
-            }
-            scores = BenchmarkStorage.setICloudSyncEnabled(isEnabled, currentScores: scores)
-            presentICloudNoAccountAlertIfNeeded()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)) { _ in
-            guard iCloudHistorySyncEnabled else { return }
-            scores = BenchmarkStorage.load()
-        }
-        .iCloudNoAccountAlert(
-            isPresented: $isShowingICloudNoAccountAlert,
-            suppressFutureWarnings: {
-                iCloudNoAccountWarningDismissed = true
-            }
-        )
-        #endif
     }
+    #endif
 
     private func presentICloudNoAccountAlertIfNeeded() {
         guard iCloudHistorySyncEnabled,
@@ -387,6 +496,36 @@ extension View {
         self.fullScreenCover(item: item, content: content)
         #endif
     }
+
+    @ViewBuilder
+    func bencherNativeMinimizedSearchButton() -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            self.searchToolbarBehavior(.minimize)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func bencherTabBarDockBehavior(_ preferenceRawValue: String, selectedTab: String) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            if TabBarDockPreference.usesMinimisedBar(for: preferenceRawValue, selectedTab: selectedTab) {
+                self.tabBarMinimizeBehavior(.onScrollDown)
+            } else {
+                self.tabBarMinimizeBehavior(.never)
+            }
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
 }
 
 enum DashboardHistoryAction {
@@ -423,6 +562,7 @@ struct BenchmarkView: View {
     @State private var taskProgress: Double = 0.0
     @State private var benchmarkTask: DispatchWorkItem?
     @State private var activeBenchmarkRunID: UUID? = nil
+    @State private var cancellationMessageResetID: UUID? = nil
 
     var body: some View {
         ZStack {
@@ -844,6 +984,7 @@ struct BenchmarkView: View {
         ssdRawWriteMBps = nil
         graphicsScore = nil
         overallScore = nil
+        cancellationMessageResetID = nil
         progressMessage = "Starting benchmark..."
         overallProgress = 0.0
         taskProgress = 0.0
@@ -1149,9 +1290,17 @@ struct BenchmarkView: View {
         ssdRawWriteMBps = nil
         graphicsScore = nil
         overallScore = nil
-        progressMessage = "Ready to benchmark!"
-        overallProgress = 0.0
-        taskProgress = 0.0
+        progressMessage = BenchmarkCancellationState.cancelled.progressMessage
+        overallProgress = BenchmarkCancellationState.cancelled.overallProgress
+        taskProgress = BenchmarkCancellationState.cancelled.taskProgress
+
+        let resetID = UUID()
+        cancellationMessageResetID = resetID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard cancellationMessageResetID == resetID, !isRunning else { return }
+            progressMessage = BenchmarkCancellationState.ready.progressMessage
+            cancellationMessageResetID = nil
+        }
     }
 
     func acknowledgeBenchmarkCompletion() {
@@ -1257,6 +1406,25 @@ private extension View {
     }
 }
 
+// MARK: - Benchmark Cancellation State
+struct BenchmarkCancellationState: Equatable {
+    let progressMessage: String
+    let overallProgress: Double
+    let taskProgress: Double
+
+    static let cancelled = BenchmarkCancellationState(
+        progressMessage: "Benchmark cancelled.",
+        overallProgress: 0.0,
+        taskProgress: 0.0
+    )
+
+    static let ready = BenchmarkCancellationState(
+        progressMessage: "Ready to benchmark!",
+        overallProgress: 0.0,
+        taskProgress: 0.0
+    )
+}
+
 // MARK: - History View
 struct HistoryView: View {
     @Binding var scores: [BenchmarkResult]
@@ -1300,6 +1468,7 @@ struct HistoryView: View {
     @State private var isShowingExportOptions: Bool = false
     @State private var latestCompletedResult: BenchmarkResult? = nil
     @State private var compactPresentedResult: BenchmarkResult? = nil
+    @State private var leaderboardHighlightedResultID: BenchmarkResult.ID? = nil
     private var sortedScores: [BenchmarkResult] {
         switch sortOption {
         case .dateNewest:
@@ -1363,6 +1532,7 @@ struct HistoryView: View {
     var body: some View {
         historyContainer
             .searchable(text: $historySearchText, prompt: "Search devices, notes or tags")
+            .bencherNativeMinimizedSearchButton()
             .onChange(of: pendingAction) { _, newValue in
                 guard let newValue else { return }
                 handlePendingDashboardAction(newValue)
@@ -1375,10 +1545,16 @@ struct HistoryView: View {
             }
             .bencherItemCover(item: $compactPresentedResult) { result in
                 NavigationStack {
-                    ScrollView {
-                        DetailedResultView(result: result, comparisonBase: comparisonBase(for: result))
-                            .padding(.top, 8)
-                            .padding(.bottom, 24)
+                    ZStack {
+                        BencherPlatformColors.systemBackground
+                            .ignoresSafeArea()
+
+                        ScrollView {
+                            DetailedResultView(result: result, comparisonBase: comparisonBase(for: result))
+                                .padding(.top, 8)
+                                .padding(.bottom, 24)
+                        }
+                        .background(BencherPlatformColors.systemBackground)
                     }
                     .bencherInlineTitleDisplayMode()
                     .toolbar {
@@ -1389,6 +1565,7 @@ struct HistoryView: View {
                         }
                     }
                 }
+                .background(BencherPlatformColors.systemBackground.ignoresSafeArea())
             }
             .sheet(item: $exportShareItem) { item in
                 ActivityView(activityItems: [item.url])
@@ -1420,14 +1597,7 @@ struct HistoryView: View {
                             isShowingLeaderboard = false
                         }
                     ) { result in
-                        selectedResultID = result.id
-                        isShowingLeaderboard = false
-
-                        if usesModalHistoryDetail {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                                compactPresentedResult = result
-                            }
-                        }
+                        selectLeaderboardResult(result)
                     }
                     .toolbar {
                         ToolbarItem(placement: .bencherTopBarTrailing) {
@@ -2017,6 +2187,8 @@ struct HistoryView: View {
     @ViewBuilder
     private func historyRowCard(for result: BenchmarkResult) -> some View {
         let isSelected = usesInlineHistoryDetail && selectedResultID == result.id
+        let isLeaderboardHighlighted = leaderboardHighlightedResultID == result.id
+        let isEmphasized = isSelected || isLeaderboardHighlighted
         let isCompact = usesModalHistoryDetail
         let scoreText = String(format: "%.0f", result.overallScore)
         let dateText = result.timestamp.formatted(date: .abbreviated, time: .shortened)
@@ -2150,23 +2322,23 @@ struct HistoryView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 18)
                 .stroke(
-                    isSelected ? Color.blue.opacity(0.35) : Color.primary.opacity(0.06),
-                    lineWidth: isSelected ? 1.6 : 1
+                    isEmphasized ? Color.blue.opacity(0.42) : Color.primary.opacity(0.06),
+                    lineWidth: isEmphasized ? 1.8 : 1
                 )
         )
         .shadow(
-            color: isSelected ? Color.blue.opacity(0.12) : Color.clear,
-            radius: isSelected ? 10 : 0,
+            color: isEmphasized ? Color.blue.opacity(0.14) : Color.clear,
+            radius: isEmphasized ? 10 : 0,
             x: 0,
             y: 0
         )
-        .scaleEffect(isSelected ? 1.01 : 1.0)
-        .animation(.easeInOut(duration: 0.18), value: isSelected)
+        .scaleEffect(isEmphasized ? 1.01 : 1.0)
+        .animation(.easeInOut(duration: 0.18), value: isEmphasized)
         .padding(.vertical, 6)
         .contentShape(Rectangle())
         .listRowBackground(
             RoundedRectangle(cornerRadius: 20)
-                .fill(isSelected ? Color.blue.opacity(0.06) : Color.clear)
+                .fill(isEmphasized ? Color.blue.opacity(0.08) : Color.clear)
                 .padding(.vertical, 4)
         )
 
@@ -2194,6 +2366,33 @@ struct HistoryView: View {
 
         if usesModalHistoryDetail {
             compactPresentedResult = matched
+        }
+    }
+
+    private func selectLeaderboardResult(_ result: BenchmarkResult) {
+        historySearchText = ""
+        selectedDeviceHistoryFilter = "All Devices"
+        selectedBenchmarkHistoryFilter = "All Intensities"
+        selectedThermalHistoryFilter = "All Thermal States"
+        selectedPowerHistoryFilter = "All Power States"
+        selectedGraphicsHistoryFilter = "All Graphics Paths"
+        favouritesOnly = false
+        selectedResultID = result.id
+        leaderboardHighlightedResultID = result.id
+        isShowingLeaderboard = false
+        Haptics.light()
+
+        let highlightedID = result.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) {
+            if leaderboardHighlightedResultID == highlightedID {
+                leaderboardHighlightedResultID = nil
+            }
+        }
+
+        if usesModalHistoryDetail {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                compactPresentedResult = result
+            }
         }
     }
 
@@ -2587,30 +2786,92 @@ struct HistoryView: View {
     }
 }
 
-// MARK: - Leaderboard View
-struct LeaderboardView: View {
-    let scores: [BenchmarkResult]
-    let onClose: () -> Void
-    let onSelect: (BenchmarkResult) -> Void
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+// MARK: - Leaderboard Ranking
 
-    private var topResults: [BenchmarkResult] {
+enum LeaderboardFilter: String, CaseIterable, Identifiable {
+    case allDevices
+    case currentDevice
+    case balancedOnly
+    case metalOnly
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .allDevices:
+            return "All Devices"
+        case .currentDevice:
+            return "This Device"
+        case .balancedOnly:
+            return "Balanced"
+        case .metalOnly:
+            return "Metal"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .allDevices:
+            return "rectangle.stack"
+        case .currentDevice:
+            return "iphone"
+        case .balancedOnly:
+            return "dial.medium"
+        case .metalOnly:
+            return "display"
+        }
+    }
+}
+
+enum LeaderboardRanking {
+    static func topResults(
+        from scores: [BenchmarkResult],
+        filter: LeaderboardFilter = .allDevices,
+        currentDeviceName: String = DeviceModel.currentDeviceName(),
+        limit: Int = 10
+    ) -> [BenchmarkResult] {
         Array(
             scores
+                .filter { result in
+                    switch filter {
+                    case .allDevices:
+                        return true
+                    case .currentDevice:
+                        return result.deviceName == currentDeviceName
+                    case .balancedOnly:
+                        return result.benchmarkIntensity == "Balanced"
+                    case .metalOnly:
+                        return result.graphicsBackend == GraphicsBenchmarkBackend.metal.rawValue
+                    }
+                }
                 .sorted {
                     if $0.overallScore == $1.overallScore {
                         return $0.timestamp > $1.timestamp
                     }
                     return $0.overallScore > $1.overallScore
                 }
-                .prefix(10)
+                .prefix(max(limit, 0))
         )
+    }
+}
+
+// MARK: - Leaderboard View
+struct LeaderboardView: View {
+    let scores: [BenchmarkResult]
+    let onClose: () -> Void
+    let onSelect: (BenchmarkResult) -> Void
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var selectedFilter: LeaderboardFilter = .allDevices
+
+    private var topResults: [BenchmarkResult] {
+        LeaderboardRanking.topResults(from: scores, filter: selectedFilter)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 leaderboardHeader
+                leaderboardFilterRow
 
                 if topResults.isEmpty {
                     leaderboardEmptyState
@@ -2680,6 +2941,32 @@ struct LeaderboardView: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(cornerRadius: 18)
+    }
+
+    private var leaderboardFilterRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(LeaderboardFilter.allCases) { filter in
+                    Button {
+                        selectedFilter = filter
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: filter.systemImage)
+                            Text(filter.title)
+                                .lineLimit(1)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(selectedFilter == filter ? .white : .primary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(selectedFilter == filter ? Color.blue : Color.primary.opacity(0.08))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
     }
 
     private var leaderboardEmptyState: some View {
@@ -6871,6 +7158,7 @@ struct SettingsView: View {
     @AppStorage("benchmarkIntensity") private var intensity: String = "Balanced"
     @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 1
     @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "Dark"
+    @AppStorage("tabBarDockPreference") private var tabBarDockPreference: String = TabBarDockPreference.automatic.rawValue
     @AppStorage("preferredExportFormat") private var preferredExportFormat: String = "JSON"
     @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
     @AppStorage("graphicsBenchmarkBackend") private var graphicsBenchmarkBackend: String = GraphicsBenchmarkBackend.metal.rawValue
@@ -7065,6 +7353,19 @@ struct SettingsView: View {
                 }
 
                 Text("Choose automatic system appearance or force light/dark mode.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section("Bottom Dock") {
+                Picker("Dock Behaviour", selection: $tabBarDockPreference) {
+                    ForEach(TabBarDockPreference.allCases) { preference in
+                        Text(preference.title).tag(preference.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(TabBarDockPreference.resolved(from: tabBarDockPreference).description)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -7920,6 +8221,7 @@ private struct UpdatesBrowserContent: View {
     var body: some View {
         updatesContent
             .searchable(text: $searchText, prompt: "Search versions, fixes or features")
+            .bencherNativeMinimizedSearchButton()
     }
 
     @ViewBuilder
