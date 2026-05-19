@@ -135,14 +135,18 @@ struct BencherTests {
     @Test
     func leaderboardRankingUsesTopTenAndNewestTieBreak() async throws {
         let baseDate = Date(timeIntervalSince1970: 1_000)
-        let results = (0..<12).map { index in
-            makeResult(
-                id: UUID(),
-                deviceName: "iPhone 17 Pro Max",
-                intensity: "Balanced",
-                graphicsBackend: GraphicsBenchmarkBackend.metal.rawValue,
-                timestamp: baseDate.addingTimeInterval(Double(index)),
-                overallScore: index == 2 ? 900 : Double(700 + index)
+        var results: [BenchmarkResult] = []
+        for index in 0..<12 {
+            let score = index == 2 ? 900.0 : Double(700 + index)
+            results.append(
+                makeResult(
+                    id: UUID(),
+                    deviceName: "iPhone 17 Pro Max",
+                    intensity: "Balanced",
+                    graphicsBackend: GraphicsBenchmarkBackend.metal.rawValue,
+                    timestamp: baseDate.addingTimeInterval(Double(index)),
+                    overallScore: score
+                )
             )
         }
         let newestTiedResult = makeResult(
@@ -206,19 +210,70 @@ struct BencherTests {
     }
 
     @Test
+    func csvExportRoundTripsImportableResults() async throws {
+        let original = makeResult(
+            id: UUID(uuidString: "99999999-9999-9999-9999-999999999999")!,
+            deviceName: "Adam's iPhone, Test Edition",
+            intensity: "Balanced",
+            graphicsBackend: GraphicsBenchmarkBackend.metal.rawValue,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            overallScore: 901
+        )
+
+        let data = BenchmarkHistoryCSVDocument.exportData(for: [original])
+        let imported = try BenchmarkHistoryCSVDocument.parseCSV(data)
+
+        #expect(imported.count == 1)
+        #expect(imported.first?.id == original.id)
+        #expect(imported.first?.deviceName == original.deviceName)
+        #expect(imported.first?.graphicsBackend == GraphicsBenchmarkBackend.metal.rawValue)
+        #expect(imported.first?.overallScore == 901)
+    }
+
+    @Test
+    func dockPreferenceRulesKeepDashboardAndBenchmarkExpanded() async throws {
+        #expect(TabBarDockPreference.usesMinimisedBar(for: TabBarDockPreference.automatic.rawValue, selectedTab: "dashboard") == false)
+        #expect(TabBarDockPreference.usesMinimisedBar(for: TabBarDockPreference.automatic.rawValue, selectedTab: "benchmark") == false)
+        #expect(TabBarDockPreference.usesMinimisedBar(for: TabBarDockPreference.automatic.rawValue, selectedTab: "history"))
+        #expect(TabBarDockPreference.usesMinimisedBar(for: TabBarDockPreference.alwaysShow.rawValue, selectedTab: "history") == false)
+        #expect(TabBarDockPreference.usesMinimisedBar(for: TabBarDockPreference.hideOnScroll.rawValue, selectedTab: "benchmark") == false)
+        #expect(TabBarDockPreference.usesMinimisedBar(for: TabBarDockPreference.hideOnScroll.rawValue, selectedTab: "settings"))
+    }
+
+    @Test
+    func storageDiagnosticsSummariseSavedHistory() async throws {
+        let result = makeResult(
+            id: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+            deviceName: "Diagnostics Device",
+            intensity: "Balanced",
+            graphicsBackend: GraphicsBenchmarkBackend.metal.rawValue,
+            timestamp: Date(timeIntervalSince1970: 2_000)
+        )
+
+        UserDefaults.standard.set(false, forKey: "icloudHistorySyncEnabled")
+        BenchmarkStorage.save([result])
+        let diagnostics = BenchmarkStorage.diagnostics()
+
+        #expect(diagnostics.activeResultCount >= 1)
+        #expect(diagnostics.localStorageBytes >= 0)
+        #expect(diagnostics.formattedStorageSize.isEmpty == false)
+        #expect(diagnostics.syncStatusText.isEmpty == false)
+    }
+
+    @Test
     func releaseNotesExposeCurrentBuildEntry() async throws {
         #expect(BencherReleaseNotesEntries.isEmpty == false)
-        #expect(BencherReleaseNotesEntries.first?.version == "V1.45")
+        #expect(BencherReleaseNotesEntries.first?.version == "V1.50")
         #expect(BencherReleaseNotesEntries.filter { $0.releaseDate == "Current Build" }.count == 1)
     }
 
     @Test
     func updateSearchFindsVersionsAndDetails() async throws {
-        let versionMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "1.45")
+        let versionMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "1.50")
         let feedbackMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "feedback icon")
         let graphicsMatches = BencherReleaseNotesEntries.rankedUpdateSearchResults(for: "mac cloud graphics")
 
-        #expect(versionMatches.first?.version == "V1.45")
+        #expect(versionMatches.first?.version == "V1.50")
         #expect(feedbackMatches.contains { $0.version == "V1.01" })
         #expect(graphicsMatches.first?.version == "V1.02")
     }

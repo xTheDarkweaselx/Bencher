@@ -28,7 +28,7 @@ enum ICloudAccountAvailability {
     }
 }
 
-private enum TabBarDockPreference: String, CaseIterable, Identifiable {
+enum TabBarDockPreference: String, CaseIterable, Identifiable {
     case automatic = "Automatic"
     case alwaysShow = "Always Show"
     case hideOnScroll = "Hide on Scroll"
@@ -133,7 +133,7 @@ struct ContentView: View {
             hasPreparedStorage = true
             presentICloudNoAccountAlertIfNeeded()
         }
-        .onChange(of: iCloudHistorySyncEnabled) { _, isEnabled in
+        .bencherOnChange(of: iCloudHistorySyncEnabled) { isEnabled in
             if !isEnabled {
                 iCloudNoAccountWarningDismissed = false
             }
@@ -163,7 +163,7 @@ struct ContentView: View {
                 hasPreparedStorage = true
                 presentICloudNoAccountAlertIfNeeded()
             }
-            .onChange(of: iCloudHistorySyncEnabled) { _, isEnabled in
+            .bencherOnChange(of: iCloudHistorySyncEnabled) { isEnabled in
                 if !isEnabled {
                     iCloudNoAccountWarningDismissed = false
                 }
@@ -497,6 +497,13 @@ extension View {
         #endif
     }
 
+    func bencherOnChange<Value: Equatable>(
+        of value: Value,
+        perform action: @escaping (Value) -> Void
+    ) -> some View {
+        onChange(of: value, perform: action)
+    }
+
     @ViewBuilder
     func bencherNativeMinimizedSearchButton() -> some View {
         #if os(iOS)
@@ -728,7 +735,7 @@ struct BenchmarkView: View {
                 .padding()
                 .frame(maxWidth: .infinity)
             }
-            .safeAreaPadding(.top, 20)
+            .padding(.top, 20)
             .scrollIndicators(.visible)
         }
     }
@@ -1533,12 +1540,12 @@ struct HistoryView: View {
         historyContainer
             .searchable(text: $historySearchText, prompt: "Search devices, notes or tags")
             .bencherNativeMinimizedSearchButton()
-            .onChange(of: pendingAction) { _, newValue in
+            .bencherOnChange(of: pendingAction) { newValue in
                 guard let newValue else { return }
                 handlePendingDashboardAction(newValue)
                 pendingAction = nil
             }
-            .onChange(of: pendingSelectedResultID) { _, newValue in
+            .bencherOnChange(of: pendingSelectedResultID) { newValue in
                 guard let newValue else { return }
                 openHistoryResult(withID: newValue)
                 pendingSelectedResultID = nil
@@ -1739,7 +1746,7 @@ struct HistoryView: View {
                     selectedResultID = sortedScores.first?.id
                 }
             }
-            .onChange(of: scores) { _, newScores in
+            .bencherOnChange(of: scores) { newScores in
                 let newSorted = newScores.sorted(by: { $0.timestamp > $1.timestamp })
                 if let selectedResultID,
                    newSorted.contains(where: { $0.id == selectedResultID }) {
@@ -4701,6 +4708,9 @@ enum BenchmarkStorage {
     private static let iCloudStorageKey = "bencher.history.icloud.v1"
     private static let iCloudSyncEnabledKey = "icloudHistorySyncEnabled"
     private static let iCloudNoAccountWarningDismissedKey = "icloudNoAccountWarningDismissed"
+    private static let lastLoadDateKey = "bencher.history.lastLoadDate"
+    private static let lastSaveDateKey = "bencher.history.lastSaveDate"
+    private static let lastSyncDateKey = "bencher.history.lastSyncDate"
 
     private enum Backend {
         case local
@@ -4708,16 +4718,36 @@ enum BenchmarkStorage {
     }
 
     static func load() -> [BenchmarkResult] {
-        load(from: activeBackend)
+        recordLoadDate()
+        return load(from: activeBackend)
     }
 
     static func save(_ scores: [BenchmarkResult]) {
         save(scores, to: activeBackend)
     }
 
+    static func diagnostics() -> BenchmarkStorageDiagnostics {
+        let localData = loadData(from: .local)
+        let iCloudData = loadData(from: .iCloud)
+        return BenchmarkStorageDiagnostics(
+            localResultCount: load(from: .local).count,
+            activeResultCount: load().count,
+            iCloudSyncEnabled: isICloudSyncEnabled,
+            iCloudAvailable: ICloudAccountAvailability.isAvailable,
+            activeLocation: activeBackend == .iCloud ? "iCloud" : "Local",
+            localStorageBytes: localData?.count ?? 0,
+            iCloudStorageBytes: iCloudData?.count ?? 0,
+            lastLoadDate: UserDefaults.standard.object(forKey: lastLoadDateKey) as? Date,
+            lastSaveDate: UserDefaults.standard.object(forKey: lastSaveDateKey) as? Date,
+            lastSyncDate: UserDefaults.standard.object(forKey: lastSyncDateKey) as? Date
+        )
+    }
+
     static func prepareForLaunch() {
+        recordLoadDate()
         guard isICloudSyncEnabled, ICloudAccountAvailability.isAvailable else { return }
         _ = NSUbiquitousKeyValueStore.default.synchronize()
+        recordSyncDate()
     }
 
     static func setICloudSyncEnabled(_ isEnabled: Bool, currentScores: [BenchmarkResult]) -> [BenchmarkResult] {
@@ -4730,6 +4760,7 @@ enum BenchmarkStorage {
                 return normalizedCurrent
             }
             _ = NSUbiquitousKeyValueStore.default.synchronize()
+            recordSyncDate()
             let merged = mergeForImport(existing: load(from: .iCloud), imported: normalizedCurrent)
             save(merged, to: .iCloud)
             return merged
@@ -4839,7 +4870,9 @@ enum BenchmarkStorage {
         case .iCloud:
             NSUbiquitousKeyValueStore.default.set(storedData, forKey: iCloudStorageKey)
             _ = NSUbiquitousKeyValueStore.default.synchronize()
+            recordSyncDate()
         }
+        recordSaveDate()
     }
 
     private static func deduplicate(_ scores: [BenchmarkResult]) -> [BenchmarkResult] {
@@ -4861,6 +4894,49 @@ enum BenchmarkStorage {
         case .iCloud:
             return NSUbiquitousKeyValueStore.default.data(forKey: iCloudStorageKey)
         }
+    }
+
+    private static func recordLoadDate() {
+        UserDefaults.standard.set(Date(), forKey: lastLoadDateKey)
+    }
+
+    private static func recordSaveDate() {
+        UserDefaults.standard.set(Date(), forKey: lastSaveDateKey)
+    }
+
+    private static func recordSyncDate() {
+        UserDefaults.standard.set(Date(), forKey: lastSyncDateKey)
+    }
+}
+
+struct BenchmarkStorageDiagnostics: Equatable {
+    let localResultCount: Int
+    let activeResultCount: Int
+    let iCloudSyncEnabled: Bool
+    let iCloudAvailable: Bool
+    let activeLocation: String
+    let localStorageBytes: Int
+    let iCloudStorageBytes: Int
+    let lastLoadDate: Date?
+    let lastSaveDate: Date?
+    let lastSyncDate: Date?
+
+    var totalStorageBytes: Int {
+        localStorageBytes + iCloudStorageBytes
+    }
+
+    var syncStatusText: String {
+        if iCloudSyncEnabled && iCloudAvailable {
+            return "iCloud sync is on and available."
+        }
+        if iCloudSyncEnabled {
+            return "iCloud sync is on, but no iCloud account is currently available."
+        }
+        return "iCloud sync is off."
+    }
+
+    var formattedStorageSize: String {
+        ByteCountFormatter.string(fromByteCount: Int64(totalStorageBytes), countStyle: .file)
     }
 }
 
@@ -6417,7 +6493,7 @@ struct TrendsView: View {
                     
                     trendsControlPanel
                     
-                    if dailyTrendPoints.isEmpty {
+                    if dailyTrendPoints.count < 2 {
                         VStack(spacing: 12) {
                             Image(systemName: "chart.line.uptrend.xyaxis.circle")
                                 .font(.system(size: 36))
@@ -6446,7 +6522,7 @@ struct TrendsView: View {
                 .padding()
             }
             .navigationTitle("Trends")
-            .onChange(of: dailyTrendPoints.map(\.date)) { _, dates in
+            .bencherOnChange(of: dailyTrendPoints.map(\.date)) { dates in
                 if let selectedTrendDate,
                    !dates.contains(where: { Calendar.current.isDate($0, inSameDayAs: selectedTrendDate) }) {
                     self.selectedTrendDate = nil
@@ -6457,23 +6533,31 @@ struct TrendsView: View {
     
     private var emptyTrendMessage: String {
         let rangeSuffix = selectedTimeRange == .allTime ? "" : " in the selected time range"
+        let visibleDays = dailyTrendPoints.count
+        let daysNeeded = max(2 - visibleDays, 0)
+        let dayWord = daysNeeded == 1 ? "day" : "days"
 
+        if visibleDays == 1 {
+            return "Only one matching result day is visible\(rangeSuffix). Add one more result on a different day to start showing trends."
+        }
+
+        let requirement = "Add \(daysNeeded) more matching result \(dayWord) to start showing trends."
         if selectedDeviceFilter != "All Devices" && selectedBenchmarkFilter != "All Types" && selectedGraphicsBackendFilter != "All Graphics Paths" {
-            return "No results yet for \(selectedDeviceFilter) using \(selectedBenchmarkFilter) mode with \(selectedGraphicsBackendFilter)\(rangeSuffix)."
+            return "No results yet for \(selectedDeviceFilter) using \(selectedBenchmarkFilter) mode with \(selectedGraphicsBackendFilter)\(rangeSuffix). \(requirement)"
         }
         if selectedDeviceFilter != "All Devices" {
-            return "No results yet for \(selectedDeviceFilter)\(rangeSuffix)."
+            return "No results yet for \(selectedDeviceFilter)\(rangeSuffix). \(requirement)"
         }
         if selectedBenchmarkFilter != "All Types" {
-            return "No results yet for \(selectedBenchmarkFilter) mode\(rangeSuffix)."
+            return "No results yet for \(selectedBenchmarkFilter) mode\(rangeSuffix). \(requirement)"
         }
         if selectedGraphicsBackendFilter != "All Graphics Paths" {
-            return "No results yet for \(selectedGraphicsBackendFilter)\(rangeSuffix)."
+            return "No results yet for \(selectedGraphicsBackendFilter)\(rangeSuffix). \(requirement)"
         }
         if selectedTimeRange != .allTime {
-            return "No results yet in the selected time range."
+            return "No results yet in the selected time range. \(requirement)"
         }
-        return "No results yet"
+        return "Add 2 result days to start showing trends."
     }
 
     private var trendsControlPanel: some View {
@@ -6974,8 +7058,7 @@ struct TrendsView: View {
     
     //@available(iOS 16.0, *)
     private func selectOverallTrendResult(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
-        guard let plotFrameAnchor = proxy.plotFrame else { return }
-        let plotFrame = geometry[plotFrameAnchor]
+        let plotFrame = geometry[proxy.plotAreaFrame]
         let relativeX = location.x - plotFrame.origin.x
         let relativeY = location.y - plotFrame.origin.y
 
@@ -7008,8 +7091,7 @@ struct TrendsView: View {
         keyPath: KeyPath<BenchmarkResult, Double>,
         points: [DailyTrendPoint]
     ) {
-        guard let plotFrameAnchor = proxy.plotFrame else { return }
-        let plotFrame = geometry[plotFrameAnchor]
+        let plotFrame = geometry[proxy.plotAreaFrame]
         let relativeX = location.x - plotFrame.origin.x
         let relativeY = location.y - plotFrame.origin.y
 
@@ -7166,6 +7248,7 @@ struct SettingsView: View {
     @State private var feedbackMessage: String? = nil
     @State private var isShowingFeedbackAlert: Bool = false
     @State private var isShowingUpdatesSheet: Bool = false
+    @State private var isShowingStorageDiagnosticsSheet: Bool = false
     @Environment(\.openURL) private var openURL
 
     private var usesSettingsHostedUpdatesOnIOS: Bool {
@@ -7173,6 +7256,17 @@ struct SettingsView: View {
         UIDevice.current.userInterfaceIdiom == .phone
         #else
         false
+        #endif
+    }
+
+    private var canShowBottomDockSetting: Bool {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            return true
+        }
+        return false
+        #else
+        return false
         #endif
     }
 
@@ -7187,6 +7281,9 @@ struct SettingsView: View {
             })
             .sheet(isPresented: $isShowingUpdatesSheet) {
                 UpdatesSheetView()
+            }
+            .sheet(isPresented: $isShowingStorageDiagnosticsSheet) {
+                StorageDiagnosticsSheetView(diagnostics: BenchmarkStorage.diagnostics())
             }
         }
     }
@@ -7286,6 +7383,13 @@ struct SettingsView: View {
                         Text("When this is on, Bencher adds your current history to iCloud and keeps future results in sync across devices using the same Apple ID.")
                             .font(.caption)
                             .foregroundColor(.secondary)
+
+                        Button {
+                            isShowingStorageDiagnosticsSheet = true
+                        } label: {
+                            Label("Advanced Storage Diagnostics", systemImage: "externaldrive.badge.gearshape")
+                        }
+                        .buttonStyle(.bordered)
                     }
                 }
 
@@ -7357,17 +7461,19 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
             }
 
-            Section("Bottom Dock") {
-                Picker("Dock Behaviour", selection: $tabBarDockPreference) {
-                    ForEach(TabBarDockPreference.allCases) { preference in
-                        Text(preference.title).tag(preference.rawValue)
+            if canShowBottomDockSetting {
+                Section("Bottom Dock") {
+                    Picker("Dock Behaviour", selection: $tabBarDockPreference) {
+                        ForEach(TabBarDockPreference.allCases) { preference in
+                            Text(preference.title).tag(preference.rawValue)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
+                    .pickerStyle(.segmented)
 
-                Text(TabBarDockPreference.resolved(from: tabBarDockPreference).description)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    Text(TabBarDockPreference.resolved(from: tabBarDockPreference).description)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Section("Export Preferences") {
@@ -7387,6 +7493,12 @@ struct SettingsView: View {
                 Text("When enabled, Bencher merges your local history into iCloud and keeps future benchmark history synced across your devices signed into the same Apple ID.")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                Button {
+                    isShowingStorageDiagnosticsSheet = true
+                } label: {
+                    Label("Advanced Storage Diagnostics", systemImage: "externaldrive.badge.gearshape")
+                }
             }
 
             Section("Graphics Benchmark") {
@@ -7689,6 +7801,66 @@ struct MetadataEditorView: View {
     }
 }
 
+private struct StorageDiagnosticsSheetView: View {
+    let diagnostics: BenchmarkStorageDiagnostics
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("History") {
+                    diagnosticsRow("Local Results", value: "\(diagnostics.localResultCount)")
+                    diagnosticsRow("Active Results", value: "\(diagnostics.activeResultCount)")
+                    diagnosticsRow("Active Location", value: diagnostics.activeLocation)
+                }
+
+                Section("Sync") {
+                    diagnosticsRow("iCloud", value: diagnostics.syncStatusText)
+                    diagnosticsRow("Last Load", value: formattedDate(diagnostics.lastLoadDate))
+                    diagnosticsRow("Last Save", value: formattedDate(diagnostics.lastSaveDate))
+                    diagnosticsRow("Last Sync", value: formattedDate(diagnostics.lastSyncDate))
+                }
+
+                Section("Storage") {
+                    diagnosticsRow("Local Storage", value: byteString(diagnostics.localStorageBytes))
+                    diagnosticsRow("iCloud Storage", value: byteString(diagnostics.iCloudStorageBytes))
+                    diagnosticsRow("Total", value: diagnostics.formattedStorageSize)
+                }
+            }
+            .navigationTitle("Storage Diagnostics")
+            .toolbar {
+                ToolbarItem(placement: .bencherTopBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 520, minHeight: 520)
+        #endif
+    }
+
+    private func diagnosticsRow(_ title: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(title)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func formattedDate(_ date: Date?) -> String {
+        guard let date else { return "Not recorded yet" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func byteString(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+}
+
 struct ReferenceDevicesView: View {
     let scores: [BenchmarkResult]
     @State private var selectedResultID: BenchmarkResult.ID?
@@ -7795,7 +7967,7 @@ struct ReferenceDevicesView: View {
                     selectedResultID = sortedScores.first?.id
                 }
             }
-            .onChange(of: sortedScores.map(\.id)) { _, ids in
+            .bencherOnChange(of: sortedScores.map(\.id)) { ids in
                 if let selectedResultID, !ids.contains(selectedResultID) {
                     self.selectedResultID = ids.first
                 } else if self.selectedResultID == nil {

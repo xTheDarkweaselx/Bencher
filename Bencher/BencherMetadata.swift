@@ -16,9 +16,21 @@ enum BencherAppMetadata {
 
 let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
+        version: "V1.50",
+        title: "Tidier Drawers, Fewer Mysteries",
+        releaseDate: "Current Build",
+        changes: [
+            "Hid iOS 26-only bottom dock controls on older iPhone and iPad versions where Apple's native dock minimising is not available.",
+            "Kept CSV import available through History so exported benchmark files can be brought back in for backup, restore and migration workflows.",
+            "Improved Trends empty states so Bencher explains exactly how many more matching result days are needed before trends can be shown.",
+            "Added an Advanced Storage Diagnostics sheet in Settings with result counts, sync status, storage size and recent load/save/sync times.",
+            "Expanded tests around CSV import/export, leaderboard ordering, compatibility helpers and benchmark cancellation state."
+        ]
+    ),
+    AppUpdateEntry(
         version: "V1.45",
         title: "Now With Fewer Vanishing Acts",
-        releaseDate: "Current Build",
+        releaseDate: "Previous Build",
         changes: [
             "Made leaderboard selections cleaner by briefly highlighting the chosen result after the leaderboard closes on iPadOS/MacOS.",
             "Added leaderboard filters for all devices, this device, Balanced runs and Metal runs so top scores are easier to compare fairly.",
@@ -39,7 +51,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V1.31",
         title: "MacOS Release Version",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Reduced permission requirements on Bencher in-line with the iOS app.",
         ]
@@ -47,7 +59,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V1.30",
         title: "Release Version Polish",
-        releaseDate: "Previous Build",
+        releaseDate: "Older Build",
         changes: [
             "Polished older update notes so the release history reads more naturally and feels less like internal development notes.",
             "Cleaned up wording around older Mac, iCloud, History, Trends, Reference and export changes while keeping the original update titles intact.",
