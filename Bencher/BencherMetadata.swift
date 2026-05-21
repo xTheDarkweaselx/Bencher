@@ -33,26 +33,19 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
             "Added an option to show early device groups before they have enough samples to be solid.",
             "Added Community Results to the Reference tab and the leaderboard.",
             "Anyone can browse Community Results — uploading results requires an Apple Account, browsing doesn't.",
+            "Allowed for collapsable docks for users on iOS 26.",
+            "Kept CSV import available through History so exported benchmark files can be brought back in for backup and importing.",
+            "Improved Trends where its data is inadequate so Bencher explains exactly how many more matching result days are needed before trends can be shown.",
+            "Added an Advanced Storage Diagnostics sheet in Settings with result counts, sync status, storage size and recent load/save/sync times.",
+            "Expanded tests around CSV import/export, leaderboard ordering, compatibility helpers and benchmark cancellation state.",
             "Made the default number of runs for stability 3 runs.",
             "Tweaked descriptions of some things to make them more clear and consistent."
         ]
     ),
     AppUpdateEntry(
-        version: "V1.50",
-        title: "Tidier Drawers, Fewer Mysteries",
-        releaseDate: "Previous Build",
-        changes: [
-            "Hid iOS 26-only bottom dock controls on older iPhone and iPad versions where Apple's native dock minimising is not available.",
-            "Kept CSV import available through History so exported benchmark files can be brought back in for backup, restore and migration workflows.",
-            "Improved Trends empty states so Bencher explains exactly how many more matching result days are needed before trends can be shown.",
-            "Added an Advanced Storage Diagnostics sheet in Settings with result counts, sync status, storage size and recent load/save/sync times.",
-            "Expanded tests around CSV import/export, leaderboard ordering, compatibility helpers and benchmark cancellation state."
-        ]
-    ),
-    AppUpdateEntry(
         version: "V1.45",
         title: "Now With Fewer Vanishing Acts",
-        releaseDate: "Older Build",
+        releaseDate: "Previous Build",
         changes: [
             "Made leaderboard selections cleaner by briefly highlighting the chosen result after the leaderboard closes on iPadOS/MacOS.",
             "Added leaderboard filters for all devices, this device, Balanced runs and Metal runs so top scores are easier to compare fairly.",
@@ -63,7 +56,7 @@ let BencherReleaseNotesEntries: [AppUpdateEntry] = [
     AppUpdateEntry(
         version: "V1.40",
         title: "Top Trumps, Top Bumps",
-        releaseDate: "Older Build",
+        releaseDate: "Previous Build",
         changes: [
             "Added a new top 10 leaderboard showing your best historic benchmarks.",
             "Improved the Mac leaderboard popup so it stays comfortably within the app window with better padding.",
