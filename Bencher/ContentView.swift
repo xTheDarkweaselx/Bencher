@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import StoreKit
 import UniformTypeIdentifiers
 import Charts
 import CryptoKit
@@ -73,13 +74,13 @@ private extension View {
         isPresented: Binding<Bool>,
         suppressFutureWarnings: @escaping () -> Void
     ) -> some View {
-        alert("iCloud Account Needed", isPresented: isPresented) {
+        alert("Sign in to iCloud", isPresented: isPresented) {
             Button("OK", role: .cancel) { }
             Button("Don't Show Again") {
                 suppressFutureWarnings()
             }
         } message: {
-            Text("Bencher could not find an iCloud account on this device, so benchmark history will stay local for now. Sign in to iCloud in Settings, then turn sync off and back on to try again.")
+            Text("We can't see an iCloud account on this device, so your history will stay local. Sign in from System Settings, then toggle sync off and on again.")
         }
     }
 }
@@ -225,7 +226,10 @@ struct ContentView: View {
             }
 
             Tab("Settings", systemImage: "gearshape", value: "settings") {
-                SettingsView(latestResult: scores.sorted(by: { $0.timestamp > $1.timestamp }).first)
+                SettingsView(
+                    latestResult: scores.sorted(by: { $0.timestamp > $1.timestamp }).first,
+                    savedResults: scores
+                )
             }
 
             if !usesSettingsHostedUpdatesOnIOS {
@@ -278,7 +282,10 @@ struct ContentView: View {
                 }
                 .tag("reference")
 
-            SettingsView(latestResult: scores.sorted(by: { $0.timestamp > $1.timestamp }).first)
+            SettingsView(
+                    latestResult: scores.sorted(by: { $0.timestamp > $1.timestamp }).first,
+                    savedResults: scores
+                )
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
@@ -339,7 +346,10 @@ struct ContentView: View {
         case "reference":
             ReferenceDevicesView(scores: scores)
         case "settings":
-            SettingsView(latestResult: scores.sorted(by: { $0.timestamp > $1.timestamp }).first)
+            SettingsView(
+                    latestResult: scores.sorted(by: { $0.timestamp > $1.timestamp }).first,
+                    savedResults: scores
+                )
         case "updates":
             UpdatesView()
         default:
@@ -544,9 +554,12 @@ enum DashboardHistoryAction {
 struct BenchmarkView: View {
     @Binding var scores: [BenchmarkResult]
     @AppStorage("benchmarkIntensity") private var benchmarkIntensity: String = "Balanced"
-    @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 1
+    @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 3
     @AppStorage("graphicsBenchmarkBackend") private var graphicsBenchmarkBackend: String = GraphicsBenchmarkBackend.metal.rawValue
+    @AppStorage("successfulBenchmarkCount") private var successfulBenchmarkCount: Int = 0
+    @AppStorage("hasRequestedAppStoreReview") private var hasRequestedAppStoreReview: Bool = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.requestReview) private var requestReview
 
     @State private var singleCoreScore: Double? = nil
     @State private var cpuScore: Double? = nil
@@ -585,7 +598,7 @@ struct BenchmarkView: View {
                     // Thermal warning UI
                     let thermal = ProcessInfo.processInfo.thermalState
                     if thermal == .critical {
-                        benchmarkNotice("Device is at critical temps. Results will be reduced.", tint: .red, systemImage: "exclamationmark.octagon.fill")
+                        benchmarkNotice("Device is overheating. Scores will be lower.", tint: .red, systemImage: "exclamationmark.octagon.fill")
                     }
                     else if thermal == .serious {
                         benchmarkNotice("Device is hot. Results may be reduced.", tint: .orange, systemImage: "thermometer.medium")
@@ -607,7 +620,7 @@ struct BenchmarkView: View {
 
                     if let benchmarkValidationSummary, benchmarkValidationSummary.reliability == .caution {
                         benchmarkNotice(
-                            benchmarkValidationSummary.primaryMessage ?? "This benchmark completed, but the result is worth treating with a little caution.",
+                            benchmarkValidationSummary.primaryMessage ?? "Run finished, but treat this result with some caution.",
                             tint: .orange,
                             systemImage: "exclamationmark.triangle.fill"
                         )
@@ -690,7 +703,7 @@ struct BenchmarkView: View {
                                 .font(.title3.weight(.bold))
                                 .foregroundColor(.primary)
 
-                            Text("Benchmark type: \(benchmarkIntensity) • Stability runs: \(benchmarkRepeatCount)")
+                            Text("Mode: \(benchmarkIntensity) • \(benchmarkRepeatCount) run\(benchmarkRepeatCount == 1 ? "" : "s")")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
 
@@ -772,7 +785,7 @@ struct BenchmarkView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Welcome to Bencher")
                         .font(.largeTitle.bold())
-                    Text("See how your CPU, memory, storage and graphics perform with one quick run.")
+                    Text("Measure your device's CPU, memory, storage and graphics in one run.")
                         .font(.callout)
                         .foregroundColor(.secondary)
                 }
@@ -791,7 +804,7 @@ struct BenchmarkView: View {
 
             HStack(spacing: 10) {
                 benchmarkIntensityMenuChip
-                benchmarkStabilityMenuChip
+                benchmarkRepeatsMenuChip
                 benchmarkInfoChip(title: benchmarkComplete ? "Ready" : (isRunning ? "In Progress" : "Idle"), systemImage: isRunning ? "waveform.path.ecg" : "checkmark.circle")
             }
         }
@@ -808,7 +821,7 @@ struct BenchmarkView: View {
     private var benchmarkControlStrip: some View {
         HStack(spacing: 12) {
             benchmarkMiniCard(title: "Intensity", value: benchmarkIntensity, tint: .blue)
-            benchmarkMiniCard(title: "Stability", value: "\(benchmarkRepeatCount) run\(benchmarkRepeatCount == 1 ? "" : "s")", tint: .green)
+            benchmarkMiniCard(title: "Repeats", value: "\(benchmarkRepeatCount) run\(benchmarkRepeatCount == 1 ? "" : "s")", tint: .green)
         }
     }
 
@@ -818,7 +831,7 @@ struct BenchmarkView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Benchmark Progress")
                         .font(.headline)
-                    Text(isRunning ? "Progress bars currently updating." : "Progress bars will update here once a run starts.")
+                    Text(isRunning ? "Updating..." : "Progress will appear here once a run starts.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -865,7 +878,7 @@ struct BenchmarkView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Live Results")
                     .font(.headline)
-                Text("Sections will be added here as the benchmark progresses.")
+                Text("Results appear as each section finishes.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -924,20 +937,20 @@ struct BenchmarkView: View {
         .disabled(isRunning)
     }
 
-    private var benchmarkStabilityMenuChip: some View {
+    private var benchmarkRepeatsMenuChip: some View {
         Menu {
             ForEach([1, 3, 5], id: \.self) { runCount in
                 Button {
                     benchmarkRepeatCount = runCount
                 } label: {
                     benchmarkMenuLabel(
-                        title: "\(runCount)x stability",
+                        title: "\(runCount) run\(runCount == 1 ? "" : "s")",
                         isSelected: benchmarkRepeatCount == runCount
                     )
                 }
             }
         } label: {
-            benchmarkInfoChip(title: "\(benchmarkRepeatCount)x stability", systemImage: "repeat")
+            benchmarkInfoChip(title: "\(benchmarkRepeatCount) run\(benchmarkRepeatCount == 1 ? "" : "s")", systemImage: "repeat")
         }
         .buttonStyle(.plain)
         .disabled(isRunning)
@@ -1211,6 +1224,7 @@ struct BenchmarkView: View {
                     )
                     scores.append(newResult)
                     BenchmarkStorage.save(scores)
+                    maybeAskForAppStoreReview()
                 }
             }
         }
@@ -1218,7 +1232,19 @@ struct BenchmarkView: View {
         benchmarkTask = workItem
         DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
     }
-    
+
+    private func maybeAskForAppStoreReview() {
+        // Counts successful, locally-run benchmarks only — imported results bump the
+        // scores array via a different path, so this counter doesn't see them.
+        successfulBenchmarkCount += 1
+        guard !hasRequestedAppStoreReview, successfulBenchmarkCount >= 5 else { return }
+        hasRequestedAppStoreReview = true
+        // Brief delay so the score-saved feedback lands before the system prompt.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            requestReview()
+        }
+    }
+
     private func averageDoubleMeasurement(repeatCount: Int, block: () -> Double) -> Double {
         let count = max(repeatCount, 1)
         let values = (0..<count).map { _ in block() }
@@ -1246,15 +1272,15 @@ struct BenchmarkView: View {
     private func summaryText(overallScore: Double) -> String {
         switch overallScore {
         case 850...:
-            return "This looks like an elite-class run from current references."
+            return "Looks like an elite-class run."
         case 700..<850:
-            return "This looks like a strong high-end run with well above average overall performance from current references."
+            return "Looks like a strong high-end run."
         case 550..<700:
-            return "This looks like an upper-mid to high-end result with solid all-round performance from current references."
+            return "Looks like an upper-mid to high-end result."
         case 400..<550:
-            return "This sits in the mid-range band from current references."
+            return "Sits in the mid-range band."
         default:
-            return "This result sits in the entry to lower-mid range from current references."
+            return "Sits in the entry to lower-mid range."
         }
     }
 
@@ -1407,7 +1433,7 @@ private struct GlassCardModifier: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     func glassCard(cornerRadius: CGFloat = 18) -> some View {
         modifier(GlassCardModifier(cornerRadius: cornerRadius))
     }
@@ -1467,6 +1493,7 @@ struct HistoryView: View {
     @State private var isShowingDeleteAllConfirmation: Bool = false
     @State private var isShowingMultiDeleteSheet: Bool = false
     @State private var isShowingLeaderboard: Bool = false
+    @State private var isShowingCommunityResults: Bool = false
     @State private var recentlyDeletedResults: [BenchmarkResult] = []
     @State private var isShowingMetadataEditor: Bool = false
     @State private var draftNote: String = ""
@@ -1619,6 +1646,22 @@ struct HistoryView: View {
                 .padding(14)
                 #endif
             }
+            .sheet(isPresented: $isShowingCommunityResults) {
+                NavigationStack {
+                    CommunityResultsView()
+                        .toolbar {
+                            ToolbarItem(placement: .bencherTopBarTrailing) {
+                                Button("Done") {
+                                    isShowingCommunityResults = false
+                                }
+                            }
+                        }
+                }
+                #if os(macOS)
+                .frame(minWidth: 640, idealWidth: 760, maxWidth: 900, minHeight: 620, idealHeight: 720, maxHeight: 840)
+                .padding(14)
+                #endif
+            }
             .fileExporter(
                 isPresented: $isShowingExporter,
                 document: exportDocument,
@@ -1627,7 +1670,7 @@ struct HistoryView: View {
             ) { result in
                 switch result {
                 case .success:
-                    historyTransferMessage = "History exported successfully."
+                    historyTransferMessage = "History exported."
                     isShowingTransferAlert = true
                 case .failure(let error):
                     historyTransferMessage = "Export failed: \(error.localizedDescription)"
@@ -1642,7 +1685,7 @@ struct HistoryView: View {
             ) { result in
                 switch result {
                 case .success:
-                    historyTransferMessage = "History exported successfully."
+                    historyTransferMessage = "History exported."
                     isShowingTransferAlert = true
                 case .failure(let error):
                     historyTransferMessage = "Export failed: \(error.localizedDescription)"
@@ -1663,7 +1706,7 @@ struct HistoryView: View {
                     }
                     importHistory(from: url)
                 case .failure(let error):
-                    historyTransferMessage = "Import failed: \(error.localizedDescription)"
+                    historyTransferMessage = "Import failed. \(error.localizedDescription)"
                     isShowingTransferAlert = true
                 }
             }
@@ -1678,7 +1721,7 @@ struct HistoryView: View {
                     deleteAllHistory()
                 }
             } message: {
-                Text("This will permanently remove all saved benchmark history.")
+                Text("Permanently removes every saved result. This can't be undone.")
             }
             .confirmationDialog("Choose export range", isPresented: $isShowingExportOptions, titleVisibility: .visible) {
                 ForEach(availableExportCounts, id: \.self) { count in
@@ -1688,7 +1731,7 @@ struct HistoryView: View {
                     }
                 }
             } message: {
-                Text("Choose how many saved results you want to export.")
+                Text("How many results to export?")
             }
             .sheet(isPresented: $isShowingCompareSheet, onDismiss: {
                 if horizontalSizeClass == .compact, shouldPresentPendingComparison, pendingComparisonResults.count == 2 {
@@ -1785,6 +1828,62 @@ struct HistoryView: View {
             historyDetailContent
         }
         #endif
+    }
+
+    @ViewBuilder
+    private var leaderboardAndCommunityButtons: some View {
+        let layoutIsCompact = horizontalSizeClass == .compact
+        let content = Group {
+            Button {
+                isShowingLeaderboard = true
+            } label: {
+                historyShortcutButtonLabel(
+                    title: "Leaderboard",
+                    detail: "Top 10",
+                    systemImage: "trophy.fill"
+                )
+            }
+            .buttonStyle(.bordered)
+            .disabled(sortedScores.isEmpty)
+
+            Button {
+                isShowingCommunityResults = true
+            } label: {
+                historyShortcutButtonLabel(
+                    title: "Community",
+                    detail: "Public",
+                    systemImage: "person.3.sequence.fill"
+                )
+            }
+            .buttonStyle(.bordered)
+        }
+
+        if layoutIsCompact {
+            HStack(spacing: 8) {
+                content
+            }
+        } else {
+            VStack(spacing: 8) {
+                content
+            }
+        }
+    }
+
+    private func historyShortcutButtonLabel(title: String, detail: String, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.headline)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
+            Text(detail)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
     }
 
     @ToolbarContentBuilder
@@ -1889,23 +1988,7 @@ struct HistoryView: View {
                 }
                 .padding(.top, horizontalSizeClass == .compact ? 0 : 4)
 
-                Button {
-                    isShowingLeaderboard = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "trophy.fill")
-                            .font(.headline)
-                        Text("Leaderboard")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer(minLength: 0)
-                        Text("Top 10")
-                            .font(.caption.weight(.semibold))
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-                }
-                .buttonStyle(.bordered)
-                .disabled(sortedScores.isEmpty)
+                leaderboardAndCommunityButtons
 
                 Picker("Sort", selection: $sortOption) {
                     ForEach(HistorySortOption.allCases) { option in
@@ -1924,8 +2007,8 @@ struct HistoryView: View {
 
                         Text(
                             recentlyDeletedResults.count == 1
-                            ? "Last deleted history item can be restored."
-                            : "Last deleted set of \(recentlyDeletedResults.count) history items can be restored."
+                            ? "Last deleted result can be restored."
+                            : "Last \(recentlyDeletedResults.count) deleted results can be restored."
                         )
                         .font(.subheadline)
                         .foregroundColor(.secondary)
@@ -1953,7 +2036,7 @@ struct HistoryView: View {
                         Text("No matching history")
                             .font(.headline)
 
-                        Text("Try clearing your search filters or running a benchmark.")
+                        Text("Try clearing your filters, or run a new benchmark.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -2713,7 +2796,7 @@ struct HistoryView: View {
             BenchmarkStorage.save(merged)
             selectedResultID = merged.first?.id
 
-            historyTransferMessage = "Import complete: added \(addedCount) new result\(addedCount == 1 ? "" : "s") and ignored \(ignoredCount) duplicate result\(ignoredCount == 1 ? "" : "s")."
+            historyTransferMessage = "Added \(addedCount). Skipped \(ignoredCount) duplicate\(ignoredCount == 1 ? "" : "s")."
             isShowingTransferAlert = true
             Haptics.success()
         } catch {
@@ -2916,7 +2999,7 @@ struct LeaderboardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Top 10 Results")
                         .font(.title2.bold())
-                    Text("Ranked by highest overall score across your saved benchmark history.")
+                    Text("Your best runs, ranked by overall score.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -2981,9 +3064,9 @@ struct LeaderboardView: View {
             Image(systemName: "trophy")
                 .font(.system(size: 38))
                 .foregroundColor(.secondary)
-            Text("No benchmark results yet")
+            Text("No results yet")
                 .font(.headline)
-            Text("Run a benchmark to start building your leaderboard.")
+            Text("Run a benchmark to start.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -3156,7 +3239,7 @@ struct DetailedResultView: View {
                         Image(systemName: "number")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("Session: \(result.sessionID.uuidString.prefix(8))")
+                        Text("Run ID: \(result.sessionID.uuidString.prefix(8))")
                             .font(.subheadline.weight(.semibold))
                             .foregroundColor(.secondary)
                     }
@@ -3172,7 +3255,7 @@ struct DetailedResultView: View {
                 }
 
                 if result.thermalState > 0 {
-                    Text("This run may have been affected because your device was getting too warm.")
+                    Text("Your device was warm during this run — scores may be lower than usual.")
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.orange)
                 }
@@ -3189,17 +3272,19 @@ struct DetailedResultView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .glassCard(cornerRadius: 18)
 
+            CommunityUploadCard(result: result)
+
             ResultMetricView(
                 title: "Single-Core Score",
                 value: result.singleCoreScore,
-                description: "Measures how fast your device handles work on a single core. Higher scores usually mean snappier everyday performance for things like browsing, opening apps and lighter games.",
+                description: "How fast a single CPU core runs. Higher means snappier everyday use — browsing, opening apps, light games.",
                 deltaText: deltaText(current: result.singleCoreScore, previous: comparisonBase?.singleCoreScore)
             )
 
             ResultMetricView(
                 title: "Multi-Core Score",
                 value: result.cpuScore,
-                description: "Measures how well your processor handles heavier work spread across multiple cores. Higher scores usually mean better performance in demanding tasks like video editing, larger workloads and more intensive games.",
+                description: "How well your CPU handles work spread across all its cores. Higher means better video editing, heavy multitasking and demanding games.",
                 deltaText: deltaText(current: result.cpuScore, previous: comparisonBase?.cpuScore)
             )
 
@@ -3207,21 +3292,21 @@ struct DetailedResultView: View {
                 title: "Memory Score",
                 value: result.memoryScore,
                 description:
-                    Text(.init("Measures how quickly your device can move and process data in memory. Higher scores usually help with heavier multitasking, large creative apps and other memory-hungry work. Raw throughput: \(String(format: "%.0f", result.memoryRawThroughputMBps)) MB/s.")),
+                    Text(.init("How fast your device moves data in memory. Higher helps with multitasking and large creative apps. Throughput: \(String(format: "%.0f", result.memoryRawThroughputMBps)) MB/s.")),
                 deltaText: deltaText(current: result.memoryScore, previous: comparisonBase?.memoryScore)
             )
 
             ResultMetricView(
                 title: "SSD Speed Score",
                 value: result.ssdScore,
-                description: "Measures how quickly your device can read and write temporary files to local storage. Higher scores usually mean faster app launches, snappier file-heavy work and better performance in storage-intensive tasks. Raw combined speed: \(String(format: "%.0f", result.ssdRawCombinedMBps)) MB/s. Raw read/write: \(String(format: "%.0f", result.ssdRawReadMBps))/\(String(format: "%.0f", result.ssdRawWriteMBps)) MB/s.",
+                description: "How fast your device reads and writes to storage. Higher means quicker app launches and file work. Combined: \(String(format: "%.0f", result.ssdRawCombinedMBps)) MB/s. Read/Write: \(String(format: "%.0f", result.ssdRawReadMBps))/\(String(format: "%.0f", result.ssdRawWriteMBps)) MB/s.",
                 deltaText: deltaText(current: result.ssdScore, previous: comparisonBase?.ssdScore)
             )
 
             ResultMetricView(
                 title: "Graphics Score",
                 value: result.graphicsScore,
-                description: "Measures graphics performance using repeated rendering work. Higher scores usually mean smoother animation, stronger game performance and better handling of visually demanding apps.",
+                description: "How well your GPU handles repeated rendering. Higher means smoother animation and stronger gaming.",
                 deltaText: deltaText(current: result.graphicsScore, previous: comparisonBase?.graphicsScore)
             )
             
@@ -3428,7 +3513,7 @@ struct DetailedResultView: View {
     }
 
     private var deviceReferenceSummary: String {
-        "These are estimated broad ranges based on this app's calibrated scoring model and the detected device class. They are intended as practical guidance only and may vary depending on thermal conditions, storage state, battery level and OS behaviour."
+        "Rough ranges based on your device class. Real scores vary with temperature, storage state, battery and OS behaviour."
     }
 
     private var deviceReferenceRows: [(name: String, score: String)] {
@@ -3825,9 +3910,9 @@ extension BenchmarkResult {
 
     var reportSummary: String {
         if bottleneck == "None" {
-            return "This run looks well balanced overall, with no obvious weak link standing out relative to the rest of the benchmark profile."
+            return "Well-balanced run — no obvious weak link."
         }
-        return "The main area worth watching in this run is \(bottleneck.lowercased()). This does not necessarily indicate a fault, but it is the part of the profile most likely to be limiting the overall result."
+        return "Watch out for \(bottleneck.lowercased()) — it's the most likely thing holding this run back. Not necessarily a fault."
     }
 
     var deviceProfile: DevicePerformanceProfile {
@@ -3875,7 +3960,7 @@ struct ProgressBar: View {
 
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(BencherPlatformColors.secondaryBackground)
                     .frame(height: 20)
 
                 RoundedRectangle(cornerRadius: 10)
@@ -3965,7 +4050,7 @@ enum GraphicsBenchmarkBackend: String, Identifiable, Codable {
     }
 }
 
-private let preferredReferenceBenchmarkIntensity = "Balanced"
+let preferredReferenceBenchmarkIntensity = "Balanced"
 
 private func usesPreferredComparisonParameters(_ result: BenchmarkResult) -> Bool {
     result.benchmarkIntensity == preferredReferenceBenchmarkIntensity
@@ -3991,16 +4076,16 @@ private func benchmarkComparisonWarning(primary: BenchmarkResult, secondary: Ben
             || primary.graphicsBackend != secondary.graphicsBackend
 
         if hasDifferentSetup {
-            return "These two runs were recorded with different benchmark settings, so this is better treated as a rough comparison than a like-for-like one."
+            return "These runs used different settings — treat this as a rough comparison."
         }
         let usesPreferredSetup = usesPreferredComparisonParameters(primary)
             && usesPreferredComparisonParameters(secondary)
         guard !usesPreferredSetup else { return nil }
-        return "One of these runs used a less typical setup, so this side-by-side view is best treated as a rough guide. For the fairest match, compare Balanced runs using Metal."
+        return "One of these runs used a less typical setup. For the fairest comparison, use Balanced runs on Metal."
     }
 
     guard primary.graphicsBackend == GraphicsBenchmarkBackend.legacy.rawValue else { return nil }
-    return "This result used Bencher's older graphics test. It is still fine to keep in your history, but the graphics score is not comparable with newer Metal results."
+    return "Uses Bencher's older graphics test — fine to keep, but the graphics score isn't comparable with Metal runs."
 }
 
 private func benchmarkBackendFilterTitle(_ backend: String) -> String {
@@ -4927,12 +5012,12 @@ struct BenchmarkStorageDiagnostics: Equatable {
 
     var syncStatusText: String {
         if iCloudSyncEnabled && iCloudAvailable {
-            return "iCloud sync is on and available."
+            return "Synced with iCloud."
         }
         if iCloudSyncEnabled {
-            return "iCloud sync is on, but no iCloud account is currently available."
+            return "Sync on, but no iCloud account found."
         }
-        return "iCloud sync is off."
+        return "Sync off."
     }
 
     var formattedStorageSize: String {
@@ -4960,7 +5045,7 @@ struct ActivityView: View {
                 }
                 .buttonStyle(.borderedProminent)
             } else {
-                Text("This export item cannot be shared on this platform.")
+                Text("Can't share this file on this platform.")
                     .foregroundColor(.secondary)
             }
 
@@ -5552,7 +5637,7 @@ struct CompareSelectionView: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Select two benchmark runs to compare. Search by device, score, date or mode")
+                    Text("Pick two runs. Search by device, score, date or mode.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -5837,7 +5922,7 @@ struct CompareResultsView: View {
                             )
                         )
 
-                    Text("Review two benchmark runs side by side and spot performance differences quickly.")
+                    Text("Two runs, side by side.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -5925,9 +6010,9 @@ struct CompareResultsView: View {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 36))
                             .foregroundColor(.orange)
-                        Text("Two valid results are required for comparison.")
+                        Text("Need two results")
                             .font(.headline)
-                        Text("Please return to History and select two benchmark runs.")
+                        Text("Open History and pick two runs to compare.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -6566,7 +6651,7 @@ struct TrendsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Trend Controls")
                         .font(.headline)
-                    Text("Choose what you want to compare and how much history appears on the charts.")
+                    Text("Pick what to chart and how far back to look.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -6596,7 +6681,7 @@ struct TrendsView: View {
                     }
                 }
 
-                Text("Use these filters to keep your trend view focused on runs that are easier to compare fairly.")
+                Text("Narrow to runs that are fair to compare.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -6613,7 +6698,7 @@ struct TrendsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text("Focus on recent performance or zoom out to see the bigger picture over time.")
+                Text("Recent runs or the long view.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -6631,7 +6716,7 @@ struct TrendsView: View {
     private var summaryCards: some View {
         trendsSectionCard(
             title: "Summary",
-            subtitle: "A quick read on the latest movement in your current filtered trend set."
+            subtitle: "Quick read on the latest movement in your filtered runs."
         ) {
             HStack(spacing: 12) {
                 trendCard(
@@ -6882,7 +6967,7 @@ struct TrendsView: View {
     private var recentRunsSection: some View {
         trendsSectionCard(
             title: "Recent Runs",
-            subtitle: "A quick glance at the latest individual runs behind the current trend view."
+            subtitle: "The latest runs behind the current trend."
         ) {
             ForEach(chronologicalScores.reversed().prefix(5)) { result in
                 HStack(spacing: 14) {
@@ -7237,18 +7322,27 @@ struct TrendsView: View {
 // MARK: - Settings View
 struct SettingsView: View {
     let latestResult: BenchmarkResult?
+    let savedResults: [BenchmarkResult]
     @AppStorage("benchmarkIntensity") private var intensity: String = "Balanced"
-    @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 1
+    @AppStorage("benchmarkRepeatCount") private var benchmarkRepeatCount: Int = 3
     @AppStorage("appAppearanceMode") private var appAppearanceMode: String = "Dark"
     @AppStorage("tabBarDockPreference") private var tabBarDockPreference: String = TabBarDockPreference.automatic.rawValue
     @AppStorage("preferredExportFormat") private var preferredExportFormat: String = "JSON"
     @AppStorage("icloudHistorySyncEnabled") private var iCloudHistorySyncEnabled: Bool = false
+    @AppStorage("communityResultsAllowExperimental") private var allowExperimentalCommunityResults: Bool = false
     @AppStorage("graphicsBenchmarkBackend") private var graphicsBenchmarkBackend: String = GraphicsBenchmarkBackend.metal.rawValue
     @State private var includeLatestBenchmarkInFeedback: Bool = false
     @State private var feedbackMessage: String? = nil
     @State private var isShowingFeedbackAlert: Bool = false
     @State private var isShowingUpdatesSheet: Bool = false
     @State private var isShowingStorageDiagnosticsSheet: Bool = false
+    @State private var isShowingCommunityBulkUploadConfirmation: Bool = false
+    @State private var communityBulkUploadMessage: String? = nil
+    @State private var isShowingCommunityBulkUploadAlert: Bool = false
+    @State private var isUploadingAllCommunityResults: Bool = false
+    @State private var bulkUploadCompleted: Int = 0
+    @State private var bulkUploadTotal: Int = 0
+    @State private var bulkUploadTask: Task<Void, Never>? = nil
     @Environment(\.openURL) private var openURL
 
     private var usesSettingsHostedUpdatesOnIOS: Bool {
@@ -7285,6 +7379,21 @@ struct SettingsView: View {
             .sheet(isPresented: $isShowingStorageDiagnosticsSheet) {
                 StorageDiagnosticsSheetView(diagnostics: BenchmarkStorage.diagnostics())
             }
+            .confirmationDialog("Upload All Community Results", isPresented: $isShowingCommunityBulkUploadConfirmation, titleVisibility: .visible) {
+                Button("Upload All Results") {
+                    bulkUploadTask = Task { @MainActor in
+                        await uploadAllCommunityResults()
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Uploads up to \(CommunityResultsService.maxUploadsPerDeviceGroup) of your most recent runs per device, mode and graphics path. Runs that aren't suitable for averaging still show up individually.")
+            }
+            .alert("Community Results", isPresented: $isShowingCommunityBulkUploadAlert, actions: {
+                Button("OK", role: .cancel) { }
+            }, message: {
+                Text(communityBulkUploadMessage ?? "No message available.")
+            })
         }
     }
 
@@ -7296,14 +7405,14 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Preferences")
                         .font(.largeTitle.bold())
-                    Text("Choose how Bencher should look and behave by default.")
+                    Text("Customise how Bencher looks and behaves.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
 
                 settingsSectionCard(
                     title: "Benchmark Defaults",
-                    description: "These settings are applied automatically when you start a new run."
+                    description: "Applied automatically when you start a new run."
                 ) {
                     VStack(alignment: .leading, spacing: 16) {
                         VStack(alignment: .leading, spacing: 8) {
@@ -7316,21 +7425,21 @@ struct SettingsView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.segmented)
-                            Text("This is the default benchmark mode Bencher will use when you start a new run.")
+                            Text("Used for every new run.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Stability Runs")
+                            Text("Repeats")
                                 .font(.headline)
-                            Picker("Stability Runs", selection: $benchmarkRepeatCount) {
+                            Picker("Repeats", selection: $benchmarkRepeatCount) {
                                 Text("1 Run").tag(1)
                                 Text("3 Runs").tag(3)
                                 Text("5 Runs").tag(5)
                             }
                             .pickerStyle(.radioGroup)
-                            Text("Use repeated runs to smooth out one-off fluctuations and create a more stable average result.")
+                            Text("Repeats the benchmark and averages the runs for a steadier number.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -7339,7 +7448,7 @@ struct SettingsView: View {
 
                 settingsSectionCard(
                     title: "Appearance",
-                    description: "Choose whether Bencher follows the system appearance or uses a fixed theme."
+                    description: "Follow your system, or pick a fixed theme."
                 ) {
                     VStack(alignment: .leading, spacing: 8) {
                         Picker("App Theme", selection: $appAppearanceMode) {
@@ -7349,7 +7458,7 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.segmented)
 
-                        Text("Follow your device setting or keep Bencher in light or dark mode.")
+                        Text("System, light or dark.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -7357,7 +7466,7 @@ struct SettingsView: View {
 
                 settingsSectionCard(
                     title: "Export Preferences",
-                    description: "Control which file format is preselected when exporting benchmark history."
+                    description: "Format used when exporting your history."
                 ) {
                     VStack(alignment: .leading, spacing: 8) {
                         Picker("Default Format", selection: $preferredExportFormat) {
@@ -7366,7 +7475,7 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.segmented)
 
-                        Text("Your preferred export format will stay selected the next time you export.")
+                        Text("Remembers your choice for next time.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -7374,20 +7483,43 @@ struct SettingsView: View {
 
                 settingsSectionCard(
                     title: "Storage & Sync",
-                    description: "Choose whether benchmark history stays only on this device or syncs through your iCloud account."
+                    description: "Keep your history on this device, or sync it across your devices with iCloud."
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle("Sync benchmark history with iCloud", isOn: $iCloudHistorySyncEnabled)
                             .toggleStyle(.switch)
 
-                        Text("When this is on, Bencher adds your current history to iCloud and keeps future results in sync across devices using the same Apple ID.")
+                        Text("Saves your history to iCloud and keeps it synced across your devices.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Toggle("Show experimental community groups", isOn: $allowExperimentalCommunityResults)
+                            .toggleStyle(.switch)
+
+                        Text("Show device groups with fewer than \(CommunityResultStatistics.minimumStableSampleCount) samples. Useful while the public dataset is small.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        if isUploadingAllCommunityResults {
+                            bulkUploadProgressRow
+                        } else {
+                            Button {
+                                isShowingCommunityBulkUploadConfirmation = true
+                            } label: {
+                                Label("Upload All Results to Community", systemImage: "icloud.and.arrow.up")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(savedResults.isEmpty)
+                        }
+
+                        Text("Sends runs that aren't already public — up to \(CommunityResultsService.maxUploadsPerDeviceGroup) of the most recent per device, mode and graphics path. Only clean Balanced runs on Metal count toward averages.")
                             .font(.caption)
                             .foregroundColor(.secondary)
 
                         Button {
                             isShowingStorageDiagnosticsSheet = true
                         } label: {
-                            Label("Advanced Storage Diagnostics", systemImage: "externaldrive.badge.gearshape")
+                            Label("Advanced Storage Diagnostics", systemImage: "externaldrive.badge.icloud")
                         }
                         .buttonStyle(.bordered)
                     }
@@ -7434,17 +7566,17 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text("Stored locally and used as your default benchmark intensity.")
+                Text("Used for every new run.")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Picker("Stability Runs", selection: $benchmarkRepeatCount) {
+                Picker("Repeats", selection: $benchmarkRepeatCount) {
                     Text("1 Run").tag(1)
                     Text("3 Runs").tag(3)
                     Text("5 Runs").tag(5)
                 }
 
-                Text("Use repeated runs to smooth out one-off fluctuations and create a more stable average result.")
+                Text("Repeats the benchmark and averages the runs for a steadier number.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -7456,7 +7588,7 @@ struct SettingsView: View {
                     Text("Dark").tag("Dark")
                 }
 
-                Text("Choose automatic system appearance or force light/dark mode.")
+                Text("System, light or dark.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -7482,7 +7614,7 @@ struct SettingsView: View {
                     Text("CSV").tag("CSV")
                 }
 
-                Text("Settings are stored locally and will remain after restarting the app.")
+                Text("Remembered between launches.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -7490,14 +7622,35 @@ struct SettingsView: View {
             Section("Storage & Sync") {
                 Toggle("Sync benchmark history with iCloud", isOn: $iCloudHistorySyncEnabled)
 
-                Text("When enabled, Bencher merges your local history into iCloud and keeps future benchmark history synced across your devices signed into the same Apple ID.")
+                Text("Saves your history to iCloud and keeps it synced across your devices.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Toggle("Show experimental community groups", isOn: $allowExperimentalCommunityResults)
+
+                Text("Show device groups with fewer than \(CommunityResultStatistics.minimumStableSampleCount) samples. Useful while the public dataset is small.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if isUploadingAllCommunityResults {
+                    bulkUploadProgressRow
+                } else {
+                    Button {
+                        isShowingCommunityBulkUploadConfirmation = true
+                    } label: {
+                        Label("Upload All Results to Community", systemImage: "icloud.and.arrow.up")
+                    }
+                    .disabled(savedResults.isEmpty)
+                }
+
+                Text("Sends runs that aren't already public — up to \(CommunityResultsService.maxUploadsPerDeviceGroup) of the most recent per device, mode and graphics path. Only clean Balanced runs on Metal count toward averages.")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
                 Button {
                     isShowingStorageDiagnosticsSheet = true
                 } label: {
-                    Label("Advanced Storage Diagnostics", systemImage: "externaldrive.badge.gearshape")
+                    Label("Advanced Storage Diagnostics", systemImage: "externaldrive.badge.icloud")
                 }
             }
 
@@ -7525,7 +7678,7 @@ struct SettingsView: View {
                         Label("View Release Notes", systemImage: "clock.badge.checkmark")
                     }
 
-                    Text("Browse recent changes and search for specific fixes or features.")
+                    Text("Search by version, feature or keyword.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -7535,13 +7688,78 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
+    private var bulkUploadProgressRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text(bulkUploadProgressText)
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                Button(role: .cancel) {
+                    bulkUploadTask?.cancel()
+                } label: {
+                    Label("Cancel", systemImage: "xmark.circle.fill")
+                }
+                .buttonStyle(.bordered)
+            }
+            if bulkUploadTotal > 0 {
+                ProgressView(value: Double(bulkUploadCompleted), total: Double(bulkUploadTotal))
+            }
+        }
+    }
+
+    private var bulkUploadProgressText: String {
+        guard bulkUploadTotal > 0 else {
+            return "Preparing..."
+        }
+        return "Uploading \(bulkUploadCompleted) of \(bulkUploadTotal)..."
+    }
+
+    @MainActor
+    private func uploadAllCommunityResults() async {
+        guard !savedResults.isEmpty else {
+            communityBulkUploadMessage = "No saved results to upload yet."
+            isShowingCommunityBulkUploadAlert = true
+            return
+        }
+
+        bulkUploadCompleted = 0
+        bulkUploadTotal = savedResults.count
+        isUploadingAllCommunityResults = true
+        defer {
+            isUploadingAllCommunityResults = false
+            bulkUploadTask = nil
+        }
+
+        do {
+            let summary = try await CommunityResultsService().uploadAll(savedResults) { completed, total in
+                Task { @MainActor in
+                    bulkUploadCompleted = completed
+                    bulkUploadTotal = total
+                }
+            }
+            communityBulkUploadMessage = summary.message
+            if summary.wasCancelled {
+                Haptics.warning()
+            } else {
+                Haptics.success()
+            }
+        } catch {
+            communityBulkUploadMessage = error.localizedDescription
+            Haptics.warning()
+        }
+
+        isShowingCommunityBulkUploadAlert = true
+    }
+
+    @ViewBuilder
     private var feedbackSectionContent: some View {
         Toggle("Include latest full benchmark result", isOn: $includeLatestBenchmarkInFeedback)
             .disabled(latestResult == nil)
 
         Text(latestResult == nil
-             ? "No saved benchmark result is available yet, so only the basic device and app details will be included."
-             : "If enabled, the latest saved benchmark result will be added beneath your message so it is easier to investigate issues.")
+             ? "No saved result yet — only basic device and app info will be attached."
+             : "Attaches your latest result below the message to help with debugging.")
             .font(.caption)
             .foregroundColor(.secondary)
 
@@ -7698,7 +7916,7 @@ struct BenchmarkRunReportView: View {
                     Text("Benchmark Report")
                         .font(.largeTitle.bold())
 
-                    Text("Your run has been saved to History. Here is a quick summary of the result.")
+                    Text("Saved to History. Here's a quick summary.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
@@ -7863,9 +8081,12 @@ private struct StorageDiagnosticsSheetView: View {
 
 struct ReferenceDevicesView: View {
     let scores: [BenchmarkResult]
+    @StateObject private var communityModel = CommunityResultsModel()
+    @AppStorage("communityResultsAllowExperimental") private var allowExperimentalCommunityResults: Bool = false
     @State private var selectedResultID: BenchmarkResult.ID?
     @State private var isShowingResultPicker: Bool = false
     @State private var resultSearchText: String = ""
+    @State private var referenceSource: ReferenceSource = .standard
 
     private let referenceSections: [ReferenceSection] = [
         ReferenceSection(
@@ -7926,6 +8147,7 @@ struct ReferenceDevicesView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     referenceHero
+                    referenceSourcePicker
 
                     if sortedScores.isEmpty {
                         VStack(spacing: 12) {
@@ -7934,7 +8156,7 @@ struct ReferenceDevicesView: View {
                                 .foregroundColor(.blue)
                             Text("No saved results yet")
                                 .font(.headline)
-                            Text("Run a benchmark first, then return here to compare one of your saved results against the built-in reference ranges.")
+                            Text("Run a benchmark first, then come back here to compare it.")
                                 .font(.callout)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -7949,12 +8171,16 @@ struct ReferenceDevicesView: View {
                         if let selectedResult {
                             selectedResultSummary(selectedResult)
 
-                            if let warningText = referenceWarningText(for: selectedResult) {
-                                referenceWarningCard(text: warningText)
-                            }
+                            if referenceSource == .standard {
+                                if let warningText = referenceWarningText(for: selectedResult) {
+                                    referenceWarningCard(text: warningText)
+                                }
 
-                            ForEach(referenceSections) { section in
-                                referenceSectionCard(section, selectedResult: selectedResult)
+                                ForEach(referenceSections) { section in
+                                    referenceSectionCard(section, selectedResult: selectedResult)
+                                }
+                            } else {
+                                communityReferenceContent(for: selectedResult)
                             }
                         }
                     }
@@ -7973,6 +8199,9 @@ struct ReferenceDevicesView: View {
                 } else if self.selectedResultID == nil {
                     self.selectedResultID = ids.first
                 }
+            }
+            .task {
+                await communityModel.load()
             }
             .sheet(isPresented: $isShowingResultPicker) {
                 NavigationStack {
@@ -8039,7 +8268,7 @@ struct ReferenceDevicesView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Compare Against Reference Devices")
                 .font(.largeTitle.bold())
-            Text("Choose one of your saved benchmark runs, then see how its overall score stacks up against broad reference bands for different Apple device classes.")
+            Text("Pick a saved run, then compare it against Bencher's built-in ranges or live community averages.")
                 .font(.callout)
                 .foregroundColor(.secondary)
         }
@@ -8051,6 +8280,29 @@ struct ReferenceDevicesView: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+
+    private var referenceSourcePicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Reference Source", selection: $referenceSource) {
+                ForEach(ReferenceSource.allCases) { source in
+                    Text(source.title).tag(source)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text(referenceSource.description)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
     private var resultPickerCard: some View {
@@ -8084,7 +8336,7 @@ struct ReferenceDevicesView: View {
             }
             .buttonStyle(.plain)
 
-            Text("Reference ranges are broad guidance based on current references. They are not intended to be used as a strict comparison.")
+            Text("These ranges are rough guidance, not a strict comparison.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -8135,6 +8387,165 @@ struct ReferenceDevicesView: View {
 
     private func referenceWarningText(for result: BenchmarkResult) -> String? {
         benchmarkComparisonWarning(primary: result)
+    }
+
+    @ViewBuilder
+    private func communityReferenceContent(for selectedResult: BenchmarkResult) -> some View {
+        if communityModel.isLoading {
+            ProgressView("Loading community averages...")
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 28)
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+        } else if let message = communityModel.message, communityModel.results.isEmpty {
+            referenceWarningCard(text: message)
+        } else {
+            let groups = communityReferenceGroups(for: selectedResult)
+            if groups.isEmpty {
+                referenceWarningCard(text: allowExperimentalCommunityResults ? "No community averages match this mode and graphics path yet." : "No solid averages yet for this mode and graphics path. Turn on experimental groups in Settings to see early data.")
+            } else {
+                communityReferenceSectionCard(groups, selectedResult: selectedResult)
+            }
+        }
+    }
+
+    private func communityReferenceGroups(for result: BenchmarkResult) -> [CommunityResultGroup] {
+        communityModel.groups
+            .filter { group in
+                guard group.benchmarkIntensity == result.benchmarkIntensity,
+                      group.graphicsBackend == result.graphicsBackend,
+                      let statistics = group.overallStatistics else {
+                    return false
+                }
+                return allowExperimentalCommunityResults || statistics.isStable
+            }
+            .sorted { lhs, rhs in
+                if lhs.deviceName == result.deviceName && rhs.deviceName != result.deviceName {
+                    return true
+                }
+                if rhs.deviceName == result.deviceName && lhs.deviceName != result.deviceName {
+                    return false
+                }
+                return (lhs.overallStatistics?.median ?? 0) > (rhs.overallStatistics?.median ?? 0)
+            }
+    }
+
+    private func communityReferenceSectionCard(_ groups: [CommunityResultGroup], selectedResult: BenchmarkResult) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Community Averages")
+                .font(.headline)
+
+            ForEach(groups) { group in
+                if let statistics = group.overallStatistics {
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(group.deviceName)
+                                .font(.subheadline.weight(.semibold))
+                            Text("Median \(String(format: "%.0f", statistics.median)) -  \(String(format: "%.0f", statistics.q1))/\(String(format: "%.0f", statistics.q3)) - \(statistics.sampleCount) samples")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(communityComparisonCaption(for: selectedResult.overallScore, statistics: statistics))
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(communityComparisonColor(for: selectedResult.overallScore, statistics: statistics))
+                        }
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text(communityMedianDelta(for: selectedResult.overallScore, statistics: statistics))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundColor(communityComparisonColor(for: selectedResult.overallScore, statistics: statistics))
+                            Text(communityEstimatedPercentile(for: selectedResult.overallScore, statistics: statistics))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(14)
+                    .background(Color.white.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(communityComparisonColor(for: selectedResult.overallScore, statistics: statistics).opacity(0.18), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func communityMedianDelta(for score: Double, statistics: CommunityResultStatistics) -> String {
+        let delta = score - statistics.median
+        let sign = delta >= 0 ? "+" : ""
+        guard statistics.median > 0 else {
+            return "\(sign)\(String(format: "%.0f", delta)) vs median"
+        }
+        let pct = (delta / statistics.median) * 100
+        return "\(sign)\(String(format: "%.0f", delta)) (\(sign)\(String(format: "%.1f", pct))%) vs median"
+    }
+
+    private func communityEstimatedPercentile(for score: Double, statistics: CommunityResultStatistics) -> String {
+        // Estimate using linear interpolation between Q1, median and Q3. We only
+        // know the quartiles, so anything beyond Q1 or Q3 is reported as a bound
+        // rather than a precise figure.
+        if score < statistics.q1 {
+            return "<=25th percentile (est.)"
+        }
+        if score > statistics.q3 {
+            return ">=75th percentile (est.)"
+        }
+        let percentile: Double
+        if score < statistics.median {
+            let span = max(statistics.median - statistics.q1, 0.0001)
+            percentile = 25 + ((score - statistics.q1) / span) * 25
+        } else {
+            let span = max(statistics.q3 - statistics.median, 0.0001)
+            percentile = 50 + ((score - statistics.median) / span) * 25
+        }
+        return "~\(percentileOrdinal(Int(percentile.rounded()))) percentile (est.)"
+    }
+
+    private func percentileOrdinal(_ value: Int) -> String {
+        let clamped = max(0, min(100, value))
+        let suffix: String
+        switch clamped % 100 {
+        case 11, 12, 13:
+            suffix = "th"
+        default:
+            switch clamped % 10 {
+            case 1: suffix = "st"
+            case 2: suffix = "nd"
+            case 3: suffix = "rd"
+            default: suffix = "th"
+            }
+        }
+        return "\(clamped)\(suffix)"
+    }
+
+    private func communityComparisonCaption(for score: Double, statistics: CommunityResultStatistics) -> String {
+        if score < statistics.q1 {
+            return "Below community Q1"
+        }
+        if score > statistics.q3 {
+            return "Above community Q3"
+        }
+        return "Within community Q1-Q3"
+    }
+
+    private func communityComparisonColor(for score: Double, statistics: CommunityResultStatistics) -> Color {
+        if score < statistics.q1 {
+            return .orange
+        }
+        if score > statistics.q3 {
+            return .green
+        }
+        return .blue
     }
 
     private func referenceWarningCard(text: String) -> some View {
@@ -8244,6 +8655,31 @@ struct ReferenceDevicesView: View {
             .clipShape(Capsule())
     }
 
+}
+
+private enum ReferenceSource: String, CaseIterable, Identifiable {
+    case standard
+    case community
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard:
+            return "Standard"
+        case .community:
+            return "Community"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .standard:
+            return "Uses Bencher's built-in score ranges."
+        case .community:
+            return "Uses live community averages for runs with matching mode and graphics path."
+        }
+    }
 }
 
 private struct ReferenceSection: Identifiable {
@@ -8409,7 +8845,7 @@ private struct UpdatesBrowserContent: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("No matching updates")
                 .font(.headline)
-            Text("Try a version number, feature name or a few words from the release notes.")
+            Text("Search by version, feature or keyword.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
@@ -8584,15 +9020,15 @@ struct DashboardView: View {
 
     private var trendSummary: String {
         guard let latest = latestResult else {
-            return "No benchmark history yet. Run your first benchmark to get started."
+            return "No results yet. Run a benchmark to get started."
         }
         guard let previous = previousComparableResult else {
-            return "No matching recent trend to show here yet."
+            return "No matching recent run to compare against."
         }
 
         let delta = latest.overallScore - previous.overallScore
         let sign = delta >= 0 ? "+" : ""
-        return "Your latest overall score is \(sign)\(String(format: "%.0f", delta)) compared with the most recent run from the same device, benchmark mode and graphics method."
+        return "Latest is \(sign)\(String(format: "%.0f", delta)) vs your last matching run."
     }
 
     var body: some View {
@@ -8602,7 +9038,7 @@ struct DashboardView: View {
                     Text("Your Briefing")
                         .font(.largeTitle.bold())
 
-                    Text("A clean place to benchmark your device, compare runs and keep an eye on performance over time.")
+                    Text("Benchmark, compare runs, and track performance over time.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
@@ -8639,7 +9075,7 @@ struct DashboardView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("No benchmark yet")
                                 .font(.headline)
-                            Text("Run your first benchmark to start filling the dashboard with results and trend highlights.")
+                            Text("Run a benchmark to get started.")
                                 .foregroundColor(.secondary)
                         }
                         .padding()

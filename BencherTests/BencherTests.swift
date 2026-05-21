@@ -200,6 +200,48 @@ struct BencherTests {
     }
 
     @Test
+    func communityStatisticsUseQuartilesAndIgnoreExtremes() async throws {
+        let statistics = try #require(CommunityResultStatistics.calculate(values: [100, 110, 120, 130, 1_000]))
+
+        #expect(statistics.sampleCount == 5)
+        #expect(statistics.filteredSampleCount == 4)
+        #expect(statistics.q1 == 110)
+        #expect(statistics.median == 120)
+        #expect(statistics.q3 == 130)
+        #expect(statistics.filteredAverage == 115)
+    }
+
+    @Test
+    func communityAverageEligibilityOnlyAcceptsStandardReliableRuns() async throws {
+        let standard = makeResult(
+            id: UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!,
+            deviceName: "Community Device",
+            intensity: "Balanced",
+            graphicsBackend: GraphicsBenchmarkBackend.metal.rawValue,
+            timestamp: Date(timeIntervalSince1970: 3_000)
+        )
+        let nonStandard = makeResult(
+            id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+            deviceName: "Community Device",
+            intensity: "Extreme",
+            graphicsBackend: GraphicsBenchmarkBackend.legacy.rawValue,
+            timestamp: Date(timeIntervalSince1970: 3_100)
+        )
+
+        #expect(standard.isCommunityAverageEligible)
+        #expect(nonStandard.isCommunityAverageEligible == false)
+    }
+
+    @Test
+    func communityStatisticsMarkSmallGroupsExperimental() async throws {
+        let experimental = try #require(CommunityResultStatistics.calculate(values: [700, 710, 720]))
+        let stable = try #require(CommunityResultStatistics.calculate(values: Array(repeating: 800, count: CommunityResultStatistics.minimumStableSampleCount)))
+
+        #expect(experimental.isStable == false)
+        #expect(stable.isStable)
+    }
+
+    @Test
     func cancellationStateBrieflyReportsCancelledThenReturnsReady() async throws {
         #expect(BenchmarkCancellationState.cancelled.progressMessage == "Benchmark cancelled.")
         #expect(BenchmarkCancellationState.cancelled.overallProgress == 0.0)
@@ -263,7 +305,7 @@ struct BencherTests {
     @Test
     func releaseNotesExposeCurrentBuildEntry() async throws {
         #expect(BencherReleaseNotesEntries.isEmpty == false)
-        #expect(BencherReleaseNotesEntries.first?.version == "V1.50")
+        #expect(BencherReleaseNotesEntries.first?.version == "V2.00")
         #expect(BencherReleaseNotesEntries.filter { $0.releaseDate == "Current Build" }.count == 1)
     }
 
